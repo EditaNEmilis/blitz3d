@@ -303,12 +303,12 @@ int multiplay_setup_host( const string &game_name ){
 	IDirectPlayLobby *lobby;
 	IDirectPlayLobby3 *lobby3;
 	if( CoCreateInstance( CLSID_DirectPlay,0,CLSCTX_ALL,IID_IDirectPlay4A,(void**)&dirPlay )>=0 ){
-		if( DirectPlayLobbyCreate( 0,&lobby,0,0,0 )>=0 ){
+		if( DirectPlayLobbyCreate( 0,&lobby,IID_IDirectPlayLobby,0,0 )>=0 ){
 			if( lobby->QueryInterface( IID_IDirectPlayLobby3,(void**)&lobby3 )>=0 ){
 				//ok, create an address for initializeconnection
 				string ip( "\0" );
 				char address[256];DWORD sz=256;
-				if( lobby3->CreateAddress( DPSPGUID_TCPIP,DPAID_INet,ip.data(),ip.size(),address,&sz )>=0 ){
+				if( lobby3->CreateAddress( &DPSPGUID_TCPIP,DPAID_INet,ip.data(),ip.size(),address,&sz )>=0 ){
 					if( dirPlay->InitializeConnection( address,0 )>=0 ){
 						string name=game_name+'\0';
 						DPSESSIONDESC2 desc;
@@ -344,12 +344,12 @@ int multiplay_setup_join( const string &game_name,const string &ip_add ){
 	IDirectPlayLobby *lobby;
 	IDirectPlayLobby3 *lobby3;
 	if( CoCreateInstance( CLSID_DirectPlay,0,CLSCTX_ALL,IID_IDirectPlay4A,(void**)&dirPlay )>=0 ){
-		if( DirectPlayLobbyCreate( 0,&lobby,0,0,0 )>=0 ){
+		if( DirectPlayLobbyCreate( 0,&lobby,IID_IDirectPlayLobby,0,0 )>=0 ){
 			if( lobby->QueryInterface( IID_IDirectPlayLobby3,(void**)&lobby3 )>=0 ){
 				//ok, create an address for initializeconnection
 				string ip=ip_add+'\0';
 				char address[256];DWORD sz=256;
-				if( lobby3->CreateAddress( DPSPGUID_TCPIP,DPAID_INet,ip.data(),ip.size(),address,&sz )>=0 ){
+				if( lobby3->CreateAddress( &DPSPGUID_TCPIP,DPAID_INet,ip.data(),ip.size(),address,&sz )>=0 ){
 					if( dirPlay->InitializeConnection( address,0 )>=0 ){
 						DPSESSIONDESC2 desc;
 						memset(&desc,0,sizeof(desc));

@@ -106,8 +106,9 @@ void DimNode::semant( Environ *e ){
 
 void DimNode::translate( Codegen *g ){
 	TNode *t;
+	int k;
 	g->code( call( "__bbUndimArray",global( "_a"+ident ) ) );
-	for( int k=0;k<exprs->size();++k ){
+	for( k=0;k<exprs->size();++k ){
 		t=add( global( "_a"+ident ),iconst( k*4+12 ) );
 		t=move( exprs->exprs[k]->translate(g),mem( t ) );
 		g->code( t );
@@ -515,8 +516,9 @@ void SelectNode::translate( Codegen *g ){
 
 	vector<string> labs;
 	string brk=genLabel();
+	int k;
 
-	for( int k=0;k<cases.size();++k ){
+	for( k=0;k<cases.size();++k ){
 		CaseNode *c=cases[k];
 		labs.push_back( genLabel() );
 		for( int j=0;j<c->exprs->size();++j ){

@@ -1,4 +1,34 @@
-Blitz3D open source release!
+*"Blitz3D open source release!"*
+
+This is a modified Blitz3D game engine for new features and supports.
+
+There are two ways to build this.
+
+1) Modern toolchain (Visual Studio 2019/2022, CMake, Ninja)
+-----------------------------------------------------------
+See BUILDING.md. In short:
+
+  1) Install freeimage241 into this directory:
+     git clone https://github.com/BlitzResearch/freeimage241
+
+  2) Obtain fmodapi375win. The fmod.org link below is dead and the GitHub
+     mirror is gone; the Internet Archive has the genuine 2,005,928 byte
+     archive:
+     https://web.archive.org/web/2018id_/http://www.fmod.org/files/public/fmodapi375win.zip
+     Unpack it here, so that this directory contains fmodapi375win/api/inc/fmod.h
+     and fmodapi375win/api/lib/fmodvc.lib.
+
+  3) Run tools\build.cmd from a machine with Visual Studio and MFC installed.
+     Binaries land in _release, and fmod.dll is copied to _release\bin.
+
+BUILDING.md documents every source change this required, the /Gz flag that the
+x86 code generator depends on, and what no longer works on a current Windows
+(DirectPlay networking, .x model loading, 320x240 exclusive fullscreen).
+
+2) Original MSVC 6.0 workspace
+------------------------------
+The blitz3d.dsw workspace and the .dsp files are unmodified. Steps as originally
+published:
 
 Workspace and project files are in MSVC 6.0 format.
 

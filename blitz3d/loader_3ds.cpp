@@ -369,7 +369,10 @@ static void parseMeshInfo( MeshModel *root,float curr_time ){
 	Vector pivot;
 	Animation anim;
 	unsigned short id=65535,parent=65535,flags1,flags2;
-	Box box( Vector(),Vector() );
+	//Spelled out rather than Box( Vector(),Vector() ): the compact form is a
+	//most vexing parse, and MSVC reads it as a function declaration.
+	Vector zero;
+	Box box( zero,zero );
 	Vector box_centre;
 	while( int chunk_id=nextChunk() ){
 		switch( chunk_id ){

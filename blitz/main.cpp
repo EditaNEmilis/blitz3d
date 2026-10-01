@@ -26,6 +26,12 @@ using namespace std;
 #include "../compiler/codegen_x86/codegen_x86.h"
 #include "../bbruntime_dll/bbruntime_dll.h"
 
+// <stdlib.h> does "#define environ _environ" with _environ expanding to
+// (*__p__environ()). The compiler's own Environ is a different thing entirely,
+// and a local named 'environ' ends up parsed as a redeclaration of that CRT
+// accessor. Nothing here wants the C environment table.
+#undef environ
+
 static void showInfo(){
 	const int major=(VERSION&0xffff)/100,minor=(VERSION&0xffff)%100;
 	cout<<"BlitzCC V"<<major<<"."<<minor<<endl;

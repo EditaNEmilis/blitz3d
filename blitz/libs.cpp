@@ -83,9 +83,10 @@ static const char *linkRuntime(){
 
 		//global!
 		int start=0,end;
+		int k;
 		Type *t=Type::void_type;
 		if( !isalpha( s[0] ) ){ start=1;t=typeof( s[0] ); }
-		for( int k=1;k<s.size();++k ){
+		for( k=1;k<s.size();++k ){
 			if( !isalnum( s[k] ) && s[k]!='_' ) break;
 		}
 		end=k;

@@ -73,13 +73,13 @@ mesh(0),n_verts(0),n_tris(0),n_frames(0){
 	vector<md2_uv> md2_uvs;
 	md2_uvs.resize( header.numTexCoords );
 	in.pubseekpos( header.offsetTexCoords );
-	in.sgetn( (char*)md2_uvs.begin(),header.numTexCoords*sizeof(md2_uv) );
+	in.sgetn( (char*)md2_uvs.data(),header.numTexCoords*sizeof(md2_uv) );
 
 	//read in triangles
 	vector<md2_tri> md2_tris;
 	md2_tris.resize( n_tris );
 	in.pubseekpos( header.offsetTriangles );
-	in.sgetn( (char*)md2_tris.begin(),n_tris*sizeof(md2_tri) );
+	in.sgetn( (char*)md2_tris.data(),n_tris*sizeof(md2_tri) );
 
 	vector<t_tri> t_tris;
 	vector<t_vert> t_verts;
@@ -129,7 +129,7 @@ mesh(0),n_verts(0),n_tris(0),n_frames(0){
 		fr->trans=Vector( fr->trans.y,fr->trans.z,fr->trans.x );
 
 		//read vertices
-		in.sgetn( (char*)md2_verts.begin(),header.numVertices*sizeof(md2_vert) );
+		in.sgetn( (char*)md2_verts.data(),header.numVertices*sizeof(md2_vert) );
 
 		fr->verts.resize( n_verts );
 		for( int j=0;j<n_verts;++j ){
@@ -170,7 +170,7 @@ MD2Rep::~MD2Rep(){
 void MD2Rep::render( Vert *v,int frame ){
 
 	const Frame &frame_a=frames[frame];
-	const Vertex *v_a=frame_a.verts.begin();
+	const Vertex *v_a=frame_a.verts.data();
 	const Vector scale_a=frame_a.scale,trans_a=frame_a.trans;
 
 	for( int k=0;k<n_verts;++v,++v_a,++k ){
@@ -183,7 +183,7 @@ void MD2Rep::render( Vert *v,int frame ){
 void MD2Rep::render( Vert *v,int frame,float time ){
 
 	const Frame &frame_b=frames[frame];
-	const Vertex *v_b=frame_b.verts.begin();
+	const Vertex *v_b=frame_b.verts.data();
 	const Vector scale_b=frame_b.scale,trans_b=frame_b.trans;
 
 	for( int k=0;k<n_verts;++v,++v_b,++k ){
@@ -203,8 +203,8 @@ void MD2Rep::render( Vert *v,int render_a,int render_b,float render_t ){
 	const Frame &frame_b=frames[render_b];
 	const Vector scale_b=frame_b.scale,trans_b=frame_b.trans;
 
-	const Vertex *v_a=frame_a.verts.begin();
-	const Vertex *v_b=frame_b.verts.begin();
+	const Vertex *v_a=frame_a.verts.data();
+	const Vertex *v_b=frame_b.verts.data();
 
 	for( int k=0;k<n_verts;++v,++v_a,++v_b,++k ){
 
@@ -234,9 +234,9 @@ void MD2Rep::render( Model *model,int render_a,int render_b,float render_t ){
 	const Frame &frame_b=frames[render_b];
 	const Vector scale_b=frame_b.scale,trans_b=frame_b.trans;
 
-	const VertexUV *uv=uvs.begin();
-	const Vertex *v_a=frame_a.verts.begin();
-	const Vertex *v_b=frame_b.verts.begin();
+	const VertexUV *uv=uvs.data();
+	const Vertex *v_a=frame_a.verts.data();
+	const Vertex *v_b=frame_b.verts.data();
 
 	mesh->lock( true );
 	for( int k=0;k<n_verts;++uv,++v_a,++v_b,++k ){
@@ -261,7 +261,7 @@ void MD2Rep::render( Model *model,int render_a,int render_b,float render_t ){
 /*
 void MD2Rep::render( Model *model,const Vert *v_a,const Vert *v_b,float render_t ){
 
-	const VertexUV *uv=uvs.begin();
+	const VertexUV *uv=uvs.data();
 
 	mesh->lock();
 	for( int k=0;k<n_verts;++uv,++v_a,++v_b,++k ){
@@ -285,8 +285,8 @@ void MD2Rep::render( Model *model,const Vert *v_a,int render_b,float render_t ){
 	const Frame &frame_b=frames[render_b];
 	const Vector scale_b=frame_b.scale,trans_b=frame_b.trans;
 
-	const VertexUV *uv=uvs.begin();
-	const Vertex *v_b=frame_b.verts.begin();
+	const VertexUV *uv=uvs.data();
+	const Vertex *v_b=frame_b.verts.data();
 
 	mesh->lock( true );
 	for( int k=0;k<n_verts;++uv,++v_a,++v_b,++k ){

@@ -11,7 +11,6 @@
 #include <windowsx.h>
 #include <ddraw.h>
 #include <dinput.h>
-#include <dmusici.h>
 
 typedef HRESULT(WINAPI * DIRECTDRAWCREATE)( GUID*, LPDIRECTDRAW*, IUnknown* );
 typedef HRESULT(WINAPI * DIRECTDRAWCREATEEX)( GUID*, VOID**, REFIID, IUnknown* );
@@ -275,23 +274,13 @@ VOID GetDXVersion( DWORD* pdwDXVersion, DWORD* pdwDXPlatform )
     // DirectX 6.1 Checks
     ///////////////////////////////////////////////////////////////////////////
 
-    // Check for DMusic, which was introduced with DX6.1
-    LPDIRECTMUSIC pDMusic = NULL;
-    CoInitialize( NULL );
-    hr = CoCreateInstance( CLSID_DirectMusic, NULL, CLSCTX_INPROC_SERVER,
-                           IID_IDirectMusic, (VOID**)&pDMusic );
-    if( FAILED(hr) )
-    {
-        OutputDebugString( "Couldn't create CLSID_DirectMusic\r\n" );
-        FreeLibrary( DDHinst );
-        return;
-    }
+    // The original probe here was "create CLSID_DirectMusic", because DirectMusic
+    // shipped with DX6.1. dmusici.h is no longer in the Windows SDK and dmusic.dll
+    // is not installed on any Windows this port targets, so that probe always
+    // failed and pinned the reported version at 0x600. bblaunch.cpp then treated
+    // that as "DirectX 7 missing" and refused to launch. The DDraw7 check below is
+    // the real evidence, so skip straight to it.
 
-    // DirectMusic was created successfully. We must be at least DX6.1
-    (*pdwDXVersion) = 0x601;
-    pDMusic->Release();
-    CoUninitialize();
-    
 
     ///////////////////////////////////////////////////////////////////////////
     // DirectX 7.0 Checks

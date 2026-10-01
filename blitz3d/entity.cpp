@@ -2,7 +2,8 @@
 #include "std.h"
 #include "entity.h"
 
-#include "stats.h"
+// The per-entity profiling header this used to include (stats.h) is not part
+// of the open source release, and nothing here needs it.
 
 Entity *Entity::_orphans,*Entity::_last_orphan;
 

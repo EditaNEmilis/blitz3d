@@ -15,6 +15,9 @@ const float TWOPI=PI*2.0f;			//360 degrees
 const float HALFPI=PI*.5f;			//90  degrees
 const float QUARTERPI=PI*.25f;		//45  degrees
 const float EPSILON=.000001f;		//small value
+//math.h defines INFINITY as a C99 float literal macro, which collides with
+//the constant of the same name below. Blitz3D wants its own "big value".
+#undef INFINITY
 const float INFINITY=10000000.0f;	//big value
 
 class Vector{

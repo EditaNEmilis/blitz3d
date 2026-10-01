@@ -6,5 +6,15 @@
 Debug
 Release
 _release
-*__Win32_*
+__*_Win32_*
 /innosetup/installs
+
+# CMake build tree (see BUILDING.md)
+/build
+
+# Third-party trees placed here per README step 1 and 2
+/freeimage241/
+/fmodapi375win/
+
+# Left behind by tools\rungame.ps1
+b3port_test.exe

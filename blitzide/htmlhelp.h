@@ -1,6 +1,12 @@
 
-#ifndef HTMLHELP_H
-#define HTMLHELP_H
+// Not HTMLHELP_H: afxhtml.h pulls in the Windows SDK's <htmlhelp.h>, which uses
+// that same guard, so sharing it makes this whole file vanish.
+#ifndef B3_HTMLHELP_H
+#define B3_HTMLHELP_H
+
+// <htmlhelp.h> also does "#define HtmlHelp HtmlHelpA/W", which would rename this
+// class out from under itself. Blitz3D never calls the Win32 HtmlHelp() API.
+#undef HtmlHelp
 
 class HtmlHelp;
 

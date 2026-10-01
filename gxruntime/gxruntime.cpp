@@ -694,8 +694,8 @@ void gxRuntime::closeAudio( gxAudio *a ){
 /////////////////
 gxInput *gxRuntime::openInput( int flags ){
 	if( input ) return 0;
-	IDirectInput7 *di;
-	if( DirectInputCreateEx( hinst,DIRECTINPUT_VERSION,IID_IDirectInput7,(void**)&di,0 )>=0 ){
+	IDirectInput8 *di;
+	if( DirectInput8Create( hinst,DIRECTINPUT_VERSION,IID_IDirectInput8W,(void**)&di,0 )>=0 ){
 		input=d_new gxInput( this,di );
 		acquireInput();
 	}else{
@@ -791,7 +791,7 @@ gxGraphics *gxRuntime::openWindowedGraphics( int w,int h,int d,bool d3d ){
 			//create clipper
 			IDirectDrawClipper *cp;
 			if( dd->CreateClipper( 0,&cp,0 )>=0 ){
-				//attach clipper 
+				//attach clipper
 				if( ps->SetClipper( cp )>=0 ){
 					//set clipper HWND
 					if( cp->SetHWnd( 0,hwnd )>=0 ){
