@@ -7,23 +7,47 @@
 
 static const int QUE_SIZE=32;
 
+// Minimum milliseconds between two DirectInput reads of the keyboard or the
+// mouse. Joystick::update() has had this all along; the keyboard and the mouse
+// did not, and between them a single frame of ordinary game code - four
+// KeyDown tests, a mouse test, MouseX and MouseY - was eight COM round trips
+// into dinput8.dll to read seven booleans and two integers.
+//
+// A throttle rather than "one poll per frame" on purpose. Coalescing on
+// gxRuntime::idle() would be tighter, but a BASIC program is free to spin
+// without ever reaching an idle: `While Not KeyDown(1) : Wend` is pure
+// generated code. In exclusive/foreground mode the keyboard delivers through
+// the device's own event buffer rather than through a WM_KEYDOWN the message
+// pump has to dispatch, so such a loop works today and would hang forever if
+// polling stopped until the next idle(). Throttling bounds the cost without
+// ever stopping input for more than 3ms, which is the same bound the joystick
+// has always accepted.
+static const int INPUT_POLL_MS=3;
+
 class Device : public gxDevice{
 public:
 	bool acquired;
+	unsigned poll_time;
 	gxInput *input;
 	IDirectInputDevice8 *device;
 
-	Device( gxInput *i,IDirectInputDevice8 *d ):input(i),acquired(false),device(d){
+	Device( gxInput *i,IDirectInputDevice8 *d ):input(i),acquired(false),poll_time(0),device(d){
 	}
 	virtual ~Device(){
 		device->Release();
 	}
 	bool acquire(){
+		poll_time=0;
 		return acquired=device->Acquire()>=0;
 	}
 	void unacquire(){
 		device->Unacquire();
 		acquired=false;
+	}
+	// True when enough time has passed to justify another read of the device.
+	// unsigned, so the 49.7-day timeGetTime wraparound still compares correctly.
+	bool due()const{
+		return timeGetTime()-poll_time>=INPUT_POLL_MS;
 	}
 };
 
@@ -36,9 +60,13 @@ public:
 			input->runtime->idle();
 			return;
 		}
+		if( !due() ) return;
 		int k,cnt=32;
 		DIDEVICEOBJECTDATA data[32],*curr;
 		if( device->GetDeviceData( sizeof(DIDEVICEOBJECTDATA),data,(DWORD*)&cnt,0 )<0 ) return;
+		// Stamped after a successful read, so a failed one retries next time
+		// rather than being swallowed for a further 3ms.
+		poll_time=timeGetTime();
 		curr=data;
 		for( k=0;k<cnt;++curr,++k ){
 			int n=curr->dwOfs;if( !n || n>255 ) continue;
@@ -57,8 +85,12 @@ public:
 			input->runtime->idle();
 			return;
 		}
+		if( !due() ) return;
 		DIMOUSESTATE state;
 		if( device->GetDeviceState(sizeof(state),&state)<0 ) return;
+		// Relative deltas accumulate inside the device between reads, so
+		// skipping a read loses no movement - it just arrives in the next one.
+		poll_time=timeGetTime();
 		if( gxGraphics *g=input->runtime->graphics ){
 			int mx=axis_states[0]+state.lX;
 			int my=axis_states[1]+state.lY;
@@ -80,7 +112,7 @@ class Joystick : public Device{
 public:
 	int type,poll_time;
 	int mins[12],maxs[12];
-	Joystick( gxInput *i,IDirectInputDevice8 *d,int t ):Device(i,d),type(t),poll_time(0){
+	Joystick( gxInput *i,IDirectInputDevice8 *d,int t ):Device(i,d),type(t){
 		for( int k=0;k<12;++k ){
 			//initialize joystick axis ranges (d'oh!)
 			DIPROPRANGE range;
@@ -98,14 +130,13 @@ public:
 		}
 	}
 	void update(){
-		unsigned tm=timeGetTime();
-		if( tm-poll_time<3 ) return;
+		if( !due() ) return;
 		if( device->Poll()<0 ){
 			acquired=false;
 			input->runtime->idle();
 			acquire();if( device->Poll()<0 ) return;
 		}
-		poll_time=tm;
+		poll_time=timeGetTime();
 		DIJOYSTATE state;
 		if( device->GetDeviceState( sizeof( state ),&state )<0 ) return;
 		axis_states[0]=(state.lX-mins[0])/(float)maxs[0]*2-1;

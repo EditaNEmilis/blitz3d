@@ -146,7 +146,9 @@ void ExprSeqNode::castTo( Type *t,Environ *e ){
 // Function call //
 ///////////////////
 ExprNode *CallNode::semant( Environ *e ){
-	Type *t=e->findType( tag );
+	//tag is empty for almost every call, and findType("") is a guaranteed miss
+	//that still walks the whole scope chain.
+	Type *t=tag.size() ? e->findType( tag ) : 0;
 	sem_decl=e->findFunc( ident );
 	if( !sem_decl || !(sem_decl->kind & DECL_FUNC) ) ex( "Function '"+ident+"' not found" );
 	FuncType *f=sem_decl->type->funcType();

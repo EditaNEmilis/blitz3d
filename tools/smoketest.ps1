@@ -89,8 +89,11 @@ $results = foreach ( $c in $cases ) {
 }
 
 $results | Format-Table -AutoSize
-$bad = $results | Where-Object { $_.stage -eq 'known-limit' -and $_.code -ne 'as-expected' }
-$bad += $results | Where-Object { $_.stage -ne 'known-limit' -and $_.code -ne 0 }
+# Wrap both sides in @(). A Where-Object that matches nothing assigns $null, and
+# `$null + <PSObject>` raises op_Addition, so this script used to die on exactly
+# the run that matters most - the one where every case passes.
+$bad = @($results | Where-Object { $_.stage -eq 'known-limit' -and $_.code -ne 'as-expected' }) +
+       @($results | Where-Object { $_.stage -ne 'known-limit' -and $_.code -ne 0 })
 Write-Output ''
 if ( $bad ) {
   Write-Output "FAILING: $(($bad | ForEach-Object { $_.case }) -join ', ')"

@@ -4,6 +4,7 @@
 #include <set>
 #include <math.h>
 #include <stdlib.h>
+#include <string.h>
 #include <windows.h>
 
 using namespace std;
@@ -181,69 +182,104 @@ static int b3isnan( double n ){		// definition: exponent 2047, nonzero fraction.
 	return  ( fHi | fLo ) != 0;	// returns 0,1 not just 0,nonzero
 }
 
-/////////////
+///////////
 //By FLOYD!//
-/////////////
-string ftoa( float n ){
+///////////
+int ftoa( float n,char *dst ){
 
 	static const int digits=6;
 
-	int eNeg = -4, ePos = 8;	// limits for e notation.
+	int eNeg=-4,ePos=8;	// limits for e notation.
 
-	char buffer[50]; // from MSDN example, 25 would probably suffice
-	string t;
-	int dec, sign;
+	// Formats n into dst, which must have FTOA_BUFSIZE bytes of room
+	// including the terminating null, and returns the number of characters
+	// written, not counting the null.
+	//
+	// This is the Floyd routine below with every std::string temporary
+	// taken out. It used to build between five and seven of them - the
+	// _ecvt result, a "0."+zeros concat, two substrs, a final truncating
+	// copy and a "-" concat - for what is the single most executed
+	// allocation site in the runtime, since every "x"+someFloat in a Blitz
+	// program comes through here. The arithmetic is unchanged, digit for
+	// digit; tools\golden pins it.
 
-	if ( b3finite( n ) ){
+	if( !b3finite( n ) ){
 
-//		if ( digits < 1 ) digits = 1;	// less than one digit is nonsense
-//		if ( digits > 8 ) digits = 8;	// practical maximum for float
-		
-		t = _ecvt( n, digits, &dec, &sign );
+		if( b3isnan( n ) ){ dst[0]='N';dst[1]='a';dst[2]='N';dst[3]=0;return 3; }
+		if( n>0.0 ){ memcpy( dst,"Infinity",9 );return 8; }
+		if( n<0.0 ){ memcpy( dst,"-Infinity",10 );return 9; }
 
-		if ( dec <= eNeg + 1 || dec > ePos ){
+		abort();
+	}
 
-			_gcvt( n, digits, buffer );
-			t = buffer;
-			return t;
-		}
-		
-		// Here is the tricky case. We want a nicely formatted
-		// number with no e-notation or multiple trailing zeroes.
-	
-		if ( dec <= 0 ){
+	// _ecvt hands back exactly `digits` significant digits in its own
+	// static buffer, with neither the sign nor a decimal point, and puts the
+	// decimal point at power of ten `dec`. The runtime is single threaded,
+	// so that static buffer is no less safe here than the old code's use of
+	// the return value was - it is exactly what the old code did.
 
-			t = "0." + string( -dec, '0' ) + t;
-			dec = 1;	// new location for decimal point
+	int dec,sign;
 
-		}
-		else if( dec < digits ){
+	const char *digs=_ecvt( n,digits,&dec,&sign );
 
-			t = t.substr( 0, dec ) + "." + t.substr( dec );
+	if( dec<=eNeg+1 || dec>ePos ){
 
-		}
-		else{
+		// %g form - _gcvt emits the sign itself.
 
-			t = t + string( dec - digits, '0' ) + ".0";
-			dec += dec - digits;
+		_gcvt( n,digits,dst );
+		return (int)strlen( dst );
+	}
 
-		}
-	
-		// Finally, trim off excess zeroes.
+	// Here is the tricky case. We want a nicely formatted
+	// number with no e-notation or multiple trailing zeroes.
 
-		int dp1 = dec + 1, p = t.length();	
-		while( --p > dp1 && t[p] == '0' );
-		t = string( t, 0, ++p );
+	int len=0;
 
-		return sign ? "-" + t : t;
+	if( dec<=0 ){
 
-	}	// end of finite case
+		dst[len++]='0';
+		dst[len++]='.';
+		for( int k=0;k<-dec;++k ) dst[len++]='0';
+		memcpy( dst+len,digs,digits );len+=digits;
+		dec=1;	// new location for decimal point
 
-	if ( b3isnan( n ) )	return "NaN";
-	if ( n > 0.0 )		return "Infinity";
-	if ( n < 0.0 )		return "-Infinity";
+	}else if( dec<digits ){
 
-	abort();
+		memcpy( dst,digs,dec );
+		dst[dec]='.';
+		memcpy( dst+dec+1,digs+dec,digits-dec );
+		len=digits+1;
+
+	}else{
+
+		memcpy( dst,digs,digits );
+		for( int k=digits;k<dec;++k ) dst[k]='0';
+		dst[dec]='.';
+		dst[dec+1]='0';
+		len=dec+2;
+		dec+=dec-digits;
+
+	}
+
+	// Finally, trim off excess zeroes.
+
+	int dp1=dec+1,p=len;
+	while( --p>dp1 && dst[p]=='0' ) ;
+	++p;
+
+	if( sign ){
+		memmove( dst+1,dst,p );
+		dst[0]='-';
+		++p;
+	}
+
+	dst[p]=0;
+	return p;
+}
+
+string ftoa( float n ){
+	char buffer[FTOA_BUFSIZE];
+	return string( buffer,ftoa( n,buffer ) );
 }
 
 /*

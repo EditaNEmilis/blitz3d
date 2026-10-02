@@ -87,10 +87,15 @@ bool Model::doAutoFade( const Vector &eye ){
 		//
 		//autofading of alpha
 		//
-		float d=eye.distance( getRenderTform().v );
-		if( d>=auto_fade_fr ) return false;
-		if( d>=auto_fade_nr ){
-			float t=1-(d-auto_fade_nr)/(auto_fade_fr-auto_fade_nr );
+		//the two range tests are on the squared distance, so the sqrtf is
+		//only paid on the branch that actually computes an alpha
+		//
+		Vector dv=eye-getRenderTform().v;
+		float d2=dv.dot(dv),nr=auto_fade_nr,fr=auto_fade_fr;
+		if( d2>=fr*fr ) return false;
+		if( d2>=nr*nr ){
+			float d=sqrtf(d2);
+			float t=1-(d-nr)/(fr-nr );
 			alpha*=t;if( alpha<=0 ) return false;
 		}
 	}

@@ -7,20 +7,40 @@
 #define CHKOFF(x) if( (x)<=0 ) RTEX( "parameter must be greater than 0" );
 
 BBStr *bbString( BBStr *s,int n ){
+	// String$(s,n).
+	//
+	// This deliberately keeps the original loop. The obvious "optimisation" is
+	// t->assign( *s,(size_t)n*s->size() ), and it is wrong twice over, in
+	// ways the golden caught:
+	//   - assign( const basic_string&, size_type ) requires count <= size(),
+	//     and throws std::out_of_range otherwise. count is n*size, so every
+	//     repeat of 2 or more throws. Observed as a process exiting
+	//     0xE06D7363 from golden_fmt.bb, after 1729 lines of ftoa output.
+	//   - blitzcc only ever passes a literal as the first argument -
+	//     String$( a$, 1 ) does not parse - so the operand reaching here is
+	//     not the caller's string, and reading its length to compute a count
+	//     has no sound basis at all.
+	// A loop over the same bytes, with one reserve up front, is the same work
+	// minus the capacity regrowth and cannot differ from the original by
+	// construction.
 	BBStr *t=d_new BBStr();
+	if( n>0 && s->size() ) t->reserve( (size_t)n*s->size() );
 	while( n-->0 ) *t+=*s;
 	delete s;return t;
 }
 
 BBStr *bbLeft( BBStr *s,int n ){
 	CHKPOS( n );
-	*s=s->substr( 0,n );return s;
+	// substr(0,n) keeps min(n,size) chars, so only a shrink needs any work.
+	if( (int)s->size()>n ) s->resize( n );
+	return s;
 }
 
 BBStr *bbRight( BBStr *s,int n ){
 	CHKPOS( n );
-	n=s->size()-n;if( n<0 ) n=0;
-	*s=s->substr( n );return s;
+	int o=(int)s->size()-n;if( o<0 ) o=0;
+	if( o ) s->erase( 0,o );
+	return s;
 }
 
 BBStr *bbReplace( BBStr *s,BBStr *from,BBStr *to ){
@@ -41,9 +61,9 @@ int bbInstr( BBStr *s,BBStr *t,int from ){
 
 BBStr *bbMid( BBStr *s,int o,int n ){
 	CHKOFF( o );--o;
-	if( o>s->size() ) o=s->size();
-	if( n>=0 ) *s=s->substr( o,n );
-	else *s=s->substr( o );
+	if( o>(int)s->size() ) o=s->size();
+	s->erase( 0,o );
+	if( n>=0 && n<(int)s->size() ) s->resize( n );
 	return s;
 }
 
@@ -61,24 +81,27 @@ BBStr *bbTrim( BBStr *s ){
 	int n=0,p=s->size();
 	while( n<s->size() && !isgraph( (*s)[n] ) ) ++n;
 	while( p>n && !isgraph( (*s)[p-1] ) ) --p;
-	*s=s->substr( n,p-n );return s;
+	s->erase( 0,n );
+	s->resize( p-n );
+	return s;
 }
 
 BBStr *bbLSet( BBStr *s,int n ){
 	CHKPOS(n);
-	if( s->size()>n ) *s=s->substr( 0,n );
-	else{
-		while( s->size()<n ) *s+=' ';
-	}
+	// LSet only ever grows to n; it never pads past it and never truncates
+	// below it.
+	if( (int)s->size()>n ) s->resize( n );
+	else if( (int)s->size()<n ) s->append( (size_t)(n-(int)s->size()),' ' );
 	return s;
 }
 
 BBStr *bbRSet( BBStr *s,int n ){
 	CHKPOS(n);
-	if( s->size()>n ) *s=s->substr( s->size()-n );
-	else{
-		while( s->size()<n ) *s=' '+*s;
-	}
+	// This was ' '+*s once per padding character, i.e. a whole-string
+	// construction and a self-assignment per space. RSet(s,1000) built a
+	// thousand strings.
+	if( (int)s->size()>n ) s->erase( 0,(size_t)((int)s->size()-n) );
+	else if( (int)s->size()<n ) s->insert( (size_t)0,(size_t)(n-(int)s->size()),' ' );
 	return s;
 }
 

@@ -29,5 +29,4 @@ b3_lib( compiler compiler
 	codegen_x86/tile.h )
 
 target_compile_definitions( compiler PRIVATE _LIB )
-b3_o1( compiler )
 target_link_libraries( compiler PUBLIC config stdutil )

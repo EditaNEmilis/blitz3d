@@ -1,4 +1,4 @@
-﻿# Building Blitz3D with a modern toolchain
+# Building Blitz3D with a modern toolchain
 
 The original build in `README.TXT` is an MSVC 6.0 workspace. That compiler is
 long gone, and the IDE plus debugger need MFC, which no longer pairs with the
@@ -81,7 +81,10 @@ _release\bin\fmod.dll     audio, staged for the runtime to load
 
 ## Verifying
 
-Two scripts check the result end to end.
+Four scripts check the result. Two of them answer "does it still work", two
+answer "did it get faster" and "is it still correct".
+
+### Does it still work
 
 `tools\smoketest.ps1` compiles and runs thirteen small Blitz programs and
 checks the exit code of each. Twelve must exit 0; the thirteenth asserts a
@@ -97,10 +100,105 @@ tools\rungame.ps1 _release\Games\TunnelRun
 tools\rungame.ps1 _release\samples\birdie\dominos
 ```
 
-`tools\probe.ps1 -Dir <project>` compiles a single project with `cl` directly
-and summarises the errors. It was the porting aid; it is kept because it is the
-quickest way to see whether a source change breaks one project without
-relinking the world.
+### Is it still correct
+
+`tools\smoketest.ps1` and `tools\rungame.ps1` both answer the same question:
+does it run and exit cleanly. That is the wrong question for most changes to
+this engine, because the expensive rewrites are exactly the ones whose failure
+mode is a plausible-looking wrong number rather than a crash. Rewriting float
+formatting, rewriting the string library and replacing the `Matrix`/`Transform`
+scratch rings all either work or produce garbage that looks fine.
+
+`tools\verify.ps1` is the gate for those. It runs three programs in
+`tools\golden\` and compares their output byte for byte against
+`tools\golden\expected\`:
+
+| program | pins |
+|---|---|
+| `golden_core.bb` | entity/transform math, `TFormPoint`/`TFormVector`/`TFormNormal`, `EntityDistance`, matrix elements, mesh fitting. 768 lines. This is the only gate for `geom.h`. |
+| `golden_fmt.bb` | `ftoa` over a dense sweep plus every documented edge case of `Left`/`Right`/`Mid`/`Trim`/`LSet`/`RSet`/`String$`. 1936 lines. |
+| `golden_collide.bb` | sphere/box/ellipsoid/polygon collision, every response mode, contact points and normals. 1241 lines. This is the gate for any collision broadphase. |
+
+```
+tools\verify.ps1                  check
+tools\verify.ps1 -Record          re-record, only when the current behaviour is known-good
+tools\verify.ps1 -Only collide    one case
+```
+
+Do not `-Record` to make a diff go away. A diff is a bug until proven
+otherwise.
+
+### Did it get faster
+
+`tools\bench.ps1` runs the programs in `tools\bench\`, which cover Blitz BASIC
+execution, the 2D canvas, the scene graph and collision, and blitzcc's own
+compile time, then reports operations per second against
+`tools\bench-baseline.txt`.
+
+```
+tools\bench.ps1                                  report
+tools\bench.ps1 -Baseline tools\bench-baseline.txt   report with deltas
+tools\bench.ps1 -SaveBaseline <file>            re-record
+tools\bench.ps1 -Only bb_exec                   one case
+```
+
+Every case reports the **minimum** of several internal repetitions, and that
+is not a stylistic choice. Blitz3D's register allocator emits no loop
+alignment, so the measured cost of a small hot loop depends on the address it
+happens to land at: adding one unused function ahead of a benchmark moved a
+1M-iteration eight-argument call loop from 8ms to 156ms on the same machine,
+same runtime, same source. A mean of a few runs measures code layout as much
+as it measures code. The consequence is that a change which alters generated
+code layout can move a microbenchmark by an order of magnitude for reasons
+unrelated to the optimisation, so those cases are marked layout-sensitive in
+the baseline file and any result for them has to be confirmed against a
+whole-program frame time.
+
+### B3_ALLOW_NO_3D_DEVICE
+
+`tools\bench.ps1` and `tools\verify.ps1` both set this.
+
+`gxGraphics::createScene()` asks DirectDraw 7 for `IID_IDirect3D7` and
+enumerates devices; every Windows since 8 dropped the D3D7 HAL, so it returns
+0 on any current machine and `Graphics3D` raises "Unable to create 3D Scene".
+That used to leave `World` null too, and the first `UpdateWorld` then
+dereferenced it - `bbUpdateWorld`'s `debug3d()` only reports that under the
+debugger, so a release build access-violated instead of raising "3D Graphics
+mode not set".
+
+`blitz3d_open()` now builds the `World` before it asks for a device, since
+entities, transforms, collision, animation and picking are all engine-side and
+need no device. With this variable set, a failed `createScene` is not fatal,
+so the engine core can be measured and golden-tested on a machine that cannot
+render 3D at all. Games never set it and still get the original error.
+
+Note what this does *not* give you: the D3D7 submission path in
+`gxruntime/gxscene.cpp` is still unmeasurable here, and `gxScene::clear`,
+`render` and `end` still dereference `dir3dDev` without a null check.
+
+## Quick reference
+
+```
+tools\build.cmd                        configure, build, stage into _release\
+tools\build.cmd --clean                wipe build\ first
+tools\gate.ps1                         build + verify + smoke + bench, one verdict
+tools\smoketest.ps1                    13 small programs, exit codes
+tools\rungame.ps1 <dir>                one real game
+tools\verify.ps1                       golden transcripts
+tools\bench.ps1                        benchmarks against the baseline
+tools\probe.ps1 -Dir <project>         compile one project with cl, no relink
+tools\why.ps1 <exe>                    run it, dump the text of its windows
+```
+
+`tools\gate.ps1` is the one to run after any change. It builds, checks the
+golden transcripts, runs the smoke test and re-runs the benchmarks against the
+baseline, and prints a single pass or fail. Anything short of that is a
+change nobody has checked.
+
+`tools\probe.ps1 -Dir <project>` compiles a single project with `cl`
+directly and summarises the errors. It was the porting aid; it is kept
+because it is the quickest way to see whether a source change breaks one
+project without relinking the world.
 
 ## Why the build flags matter
 

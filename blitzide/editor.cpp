@@ -432,15 +432,24 @@ void Editor::hilight( int pos ){
 
 	editCtrl.HideSelection( true,false );
 	getSel();
+
+	//A token can never span a line break - the CR is not printable, so the
+	//scan stops there - so read the line once and walk the string in memory.
+	//The old loop made a SetSel + GetSelText round trip into the RichEdit
+	//control per character, i.e. 2N cross-process calls to read N characters.
+	int ln=editCtrl.LineFromChar( pos );
+	string line=getLine( ln );
+	int from=pos-editCtrl.LineIndex( ln );
+
 	bool quote=false;
-	int end=pos,len=editCtrl.GetTextLength();
-	while( end<len ){
-		char temp[8];
-		editCtrl.SetSel( end,end+1 );
-		editCtrl.GetSelText( temp );
-		if( temp[0]=='\"' ) quote=!quote;
-		if( !quote && (temp[0]==':' || !isprint( temp[0] )) ) break;
-		++end;
+	int end=pos,sz=line.size();
+	if( from<sz ){
+		for( int k=from;k<sz;++k ){
+			char c=line[k];
+			if( c=='\"' ) quote=!quote;
+			if( !quote && (c==':' || !isprint( c ) ) ) break;
+			end=pos+(k-from)+1;
+		}
 	}
 	editCtrl.HideSelection( false,false );
 	editCtrl.SetSel( pos,end );

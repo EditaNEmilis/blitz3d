@@ -30,6 +30,13 @@ static void enumVisible(){
 
 static vector<Object*> _objsByType[1000];
 
+// Types whose _objsByType bucket was filled this frame. A scene uses a
+// handful of collision types out of the 1000 the engine allows, so clearing
+// all 1000 buckets every frame is 1000 calls for almost no work. Fixed
+// storage rather than a vector: no allocation on the per-frame path.
+static int _usedTypes[1000];
+static int _usedTypeCount;
+
 static vector<ObjCollision*> free_colls,used_colls;
 
 static ObjCollision *allocObjColl( Object *with,const Vector &coords,const Collision &coll ){
@@ -478,6 +485,11 @@ void World::update( float elapsed ){
 		Object *o=*it;
 
 		if( int n=o->getCollisionType() ){
+			//buckets are emptied at the end of the previous update, so an
+			//empty bucket here is one that has not been used yet this frame
+			if( !_objsByType[n].size() ){
+				_usedTypes[_usedTypeCount++]=n;
+			}
 			_objsByType[n].push_back(o);
 		}
 	}
@@ -492,9 +504,10 @@ void World::update( float elapsed ){
 		o->endUpdate();
 	}
 
-	for( int k=0;k<1000;++k ){
-		_objsByType[k].clear();
+	for( int k=_usedTypeCount;--k; ){
+		_objsByType[_usedTypes[k]].clear();
 	}
+	_usedTypeCount=0;
 }
 
 /****************************** Render *********************************/
@@ -513,9 +526,14 @@ struct OrderComp{
 
 struct TransComp{
 	bool operator()( Model *a,Model *b )const{
-		return 
-		cam_tform.v.distance( a->getRenderTform().v )<
-		cam_tform.v.distance( b->getRenderTform().v );
+		//squared distance. Vector::distance is a sqrtf and sqrtf is
+		//monotonic on non-negative input, so this orders bit-for-bit
+		//identically to the distance comparison it replaces - without the
+		//two square roots per comparison of an O(n log n) sort that runs
+		//per camera per mirror per frame.
+		Vector da=a->getRenderTform().v-cam_tform.v;
+		Vector db=b->getRenderTform().v-cam_tform.v;
+		return da.dot(da)<db.dot(db);
 	}
 };
 

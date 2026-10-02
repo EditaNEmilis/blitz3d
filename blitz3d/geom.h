@@ -103,10 +103,13 @@ public:
 		float dx=x-q.x,dy=y-q.y,dz=z-q.z;return sqrtf(dx*dx+dy*dy+dz*dz);
 	}
 	Vector normalized()const{
-		float l=length();return Vector( x/l,y/l,z/l );
+		//one divide, three multiplies. Plane(v0,v1,v2) is built through this,
+		//so every plane Collision::boxCollide and triangleCollide make pays
+		//for it - 24 planes and 4 planes respectively.
+		float t=1.0f/length();return Vector( x*t,y*t,z*t );
 	}
 	void normalize(){
-		float l=length();x/=l;y/=l;z/=l;
+		float t=1.0f/length();x*=t;y*=t;z*=t;
 	}
 	float yaw()const{
 		return -atan2f( x,z );

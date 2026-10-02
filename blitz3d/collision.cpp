@@ -226,10 +226,11 @@ bool Collision::sphereCollide( const Line &line,float radius,const Vector &dest,
 	float d=b*b-4*a*c;
 	if( d<0 ) return false;
 
-	float t1=(-b+sqrt(d))/(2*a);
-	float t2=(-b-sqrt(d))/(2*a);
-
-	float t=t1<t2 ? t1 : t2;
+	//a is l.d.dot(l.d) and is already known to be non-zero, so 2*a is
+	//positive and (-b-sqrt(d))/(2*a) is always the smaller root - the one
+	//the t1<t2 select below used to pick. One sqrt, one divide.
+	const float sd=sqrtf(d);
+	float t=(-b-sd)/(2*a);
 
 	if( t>time ) return false;
 

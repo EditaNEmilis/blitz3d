@@ -157,7 +157,10 @@ float _bbStrToFloat( BBStr *s ){
 }
 
 BBStr *_bbStrFromFloat( float n ){
-	return d_new BBStr( ftoa( n ) );
+	// Straight into the BBStr. ftoa(float,char*) means there is no
+	// std::string built and then copied again on the way through.
+	char buffer[FTOA_BUFSIZE];
+	return d_new BBStr( buffer,ftoa( n,buffer ) );
 }
 
 BBStr *_bbStrConst( const char *s ){
@@ -469,7 +472,11 @@ BBStr *_bbReadStr(){
 	switch( dataPtr->fieldType ){
 	case BBTYPE_END:RTEX( "Out of data" );return 0;
 	case BBTYPE_INT:return d_new BBStr( itoa( dataPtr++->field.INT ) );
-	case BBTYPE_FLT:return d_new BBStr( ftoa( dataPtr++->field.FLT ) );
+	case BBTYPE_FLT:{
+		char buffer[FTOA_BUFSIZE];
+		float n=dataPtr++->field.FLT;
+		return d_new BBStr( buffer,ftoa( n,buffer ) );
+		}
 	case BBTYPE_CSTR:return d_new BBStr( dataPtr++->field.CSTR );
 	default:RTEX( "Bad data type" );return 0;
 	}

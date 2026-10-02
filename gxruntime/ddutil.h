@@ -52,6 +52,25 @@ public:
 	}
 	void setPixel( void *p,unsigned n )const{ plot(p,n); }
 	unsigned getPixel( void *p )const{ return point(p); }
+
+	// True when this is a 32bpp format whose point() thunk takes its no-repack
+	// fast path, i.e. a plain 32-bit load. Only then is
+	// (getPixel(p)&0xffffff) the same number as (*(unsigned*)p&0xffffff), which
+	// is what lets callers compare raw pixels instead of calling through the
+	// thunk. The condition is copied verbatim from AsmCoder::CodePoint; it is
+	// deliberately not widened, because the repack path shifts channel values
+	// rather than replicating them and is therefore lossy - e.g. a 5-bit blue
+	// of 1 and a blue of 0 both expand to 0.
+	bool isPlain32()const{
+		return pitch==4 &&
+			rmask==0xff0000 && gmask==0xff00 && bmask==0xff &&
+			( amask==0 || amask==0xff000000 );
+	}
+
+	unsigned getAMask()const{ return amask; }
+	unsigned getRMask()const{ return rmask; }
+	unsigned getGMask()const{ return gmask; }
+	unsigned getBMask()const{ return bmask; }
 };
 
 #endif

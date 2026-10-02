@@ -97,9 +97,21 @@ void Parser::parseStmtSeq( StmtSeqNode *stmts,int scope ){
 				inc=inc.substr( 1,inc.size()-2 );
 
 				//WIN32 KLUDGE//
-				char buff[MAX_PATH],*p;
-				if( GetFullPathName( inc.c_str(),MAX_PATH,buff,&p ) ) inc=buff;
-				inc=tolower(inc);
+				//The literal in the source resolves to the same full path every
+				//time, and a repeated include is exactly the case that falls
+				//through to the dedupe check below, so memoise it rather than
+				//paying for GetFullPathName and a lowercased copy per statement.
+				string raw=inc;
+				map<string,string>::iterator inc_it=incPaths.find( raw );
+				if( inc_it!=incPaths.end() ){
+					inc=inc_it->second;
+				}else{
+					string full=raw;
+					char buff[MAX_PATH],*p;
+					if( GetFullPathName( raw.c_str(),MAX_PATH,buff,&p ) ) full=buff;
+					inc=tolower( full );
+					incPaths.insert( make_pair( raw,inc ) );
+				}
 
 				if( included.find( inc )!=included.end() ) break;
 

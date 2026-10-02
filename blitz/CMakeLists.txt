@@ -4,7 +4,6 @@ b3_bin( blitzcc CONSOLE
 	main.cpp )
 
 target_compile_definitions( blitzcc PRIVATE _CONSOLE )
-b3_o1( blitzcc )
 target_link_libraries( blitzcc PRIVATE
 	${B3_SYSTEM_LIBS}
 	compiler linker config stdutil blitz3d gxruntime bbruntime )

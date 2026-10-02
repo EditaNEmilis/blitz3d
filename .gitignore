@@ -18,3 +18,21 @@ __*_Win32_*
 
 # Left behind by tools\rungame.ps1
 b3port_test.exe
+
+# Scratch trees and transcript files left behind by tools\bench.ps1 and
+# tools\verify.ps1 when they are run from the repo root, or by a shell whose
+# TEMP points inside the checkout.
+/.tmp-dsh/
+scene.txt
+bb_exec.txt
+canvas2d.txt
+geometry.txt
+ftoa.txt
+strings.txt
+collide.txt
+2d.txt
+
+# The latest benchmark reading, rewritten on every run. The recorded baseline
+# next to it (tools\bench-baseline.txt) is the one worth keeping and is
+# committed; this is just a scratch output.
+tools/bench-current.txt

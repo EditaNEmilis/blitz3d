@@ -106,15 +106,12 @@ void BBModule::emitx( void *mem,int sz ){
 }
 
 bool BBModule::addSymbol( const char *sym,int pc ){
-	string t(sym);
-	if( symbols.find( t )!=symbols.end() ) return false;
-	symbols[t]=pc;return true;
+	return symbols.insert( make_pair( string(sym),pc ) ).second;
 }
 
 bool BBModule::addReloc( const char *dest_sym,int pc,bool pcrel ){
 	map<int,string> &rel=pcrel ? rel_relocs : abs_relocs;
-	if( rel.find( pc )!=rel.end() ) return false;
-	rel[pc]=string(dest_sym);return true;
+	return rel.insert( make_pair( pc,string(dest_sym) ) ).second;
 }
 
 bool BBModule::findSymbol( const char *sym,int *pc ){

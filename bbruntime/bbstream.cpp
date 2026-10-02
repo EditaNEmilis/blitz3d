@@ -127,7 +127,7 @@ void bbCopyStream( bbStream *s,bbStream *d,int buff_size ){
 		d->write( buff,n );
 		if( n<buff_size ) break;
 	}
-	delete buff;
+	delete[] buff;
 }
 
 bool stream_create(){

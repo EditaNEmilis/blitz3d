@@ -60,6 +60,23 @@ static map<string,Transform> loader_mat_map;
 static inline void debug3d(){
 	if( debug && !gx_scene ) RTEX( "3D Graphics mode not set" );
 }
+
+// Unlike debug3d() this one is unconditional. debug3d() is a development aid
+// and is compiled out of the cost of a release build, but the World is null
+// whenever Graphics3D has not been called, and UpdateWorld, CaptureWorld and
+// RenderWorld all dereference it without checking. A proper Blitz runtime
+// error is worth a predictable compare-and-branch on a path that runs once
+// per frame; an access violation in the middle of a game is not.
+static inline void needWorld(){
+	if( !world ) RTEX( "3D Graphics mode not set" );
+}
+
+// RenderWorld additionally needs a device, which is a stricter condition
+// than needWorld(): the World exists on a machine with no Direct3D 7, the
+// scene does not.
+static inline void needScene(){
+	if( !gx_scene ) RTEX( "3D Graphics device not available" );
+}
 static inline void debugTexture( Texture *t ){
 	if( debug && !texture_set.count( t ) ) RTEX( "Texture does not exist" );
 }
@@ -274,6 +291,7 @@ static int update_ms;
 
 void  bbUpdateWorld( float elapsed ){
 	debug3d();
+	needWorld();
 
 #ifndef BETA
 	world->update( elapsed );
@@ -287,11 +305,14 @@ void  bbUpdateWorld( float elapsed ){
 
 void  bbCaptureWorld(){
 	debug3d();
+	needWorld();
 	world->capture();
 }
 
 void  bbRenderWorld( float tween ){
 	debug3d();
+	needWorld();
+	needScene();
 
 #ifndef BETA
 	tri_count=gx_scene->getTrianglesDrawn();
@@ -1928,8 +1949,21 @@ int  bbActiveTextures(){
 }
 
 void blitz3d_open(){
-	gx_scene=gx_graphics->createScene( 0 );
-	if( !gx_scene ) RTEX( "Unable to create 3D Scene" );
+	// The scene is the device half and the World is the engine half. They used
+	// to be created together, with createScene() first and an immediate error
+	// if it returned 0. That matters because gxGraphics::createScene()
+	// (gxruntime/gxgraphics.cpp:519) asks DirectDraw 7 for IID_IDirect3D7, and
+	// every Windows since 8 dropped the D3D7 HAL, so createScene() returns 0
+	// on any current machine and the World was left null. The first
+	// UpdateWorld then dereferenced it: bbUpdateWorld's debug3d() only reports
+	// that under the debugger, so a release build access-violated instead of
+	// raising "3D Graphics mode not set".
+	//
+	// So the World is built first and on its own. It has no dependency on
+	// gx_scene: entities, transforms, collision, animation and picking all
+	// work without a device, and only World::render needs one. That is what
+	// lets tools\bench\scene.bb measure the engine core on a machine where no
+	// 3D device can be created.
 	world=d_new World();
 	projected=Vector();
 	picked.collision=Collision();
@@ -1941,14 +1975,27 @@ void blitz3d_open(){
 	loader_mat_map["3ds"]=Transform(Matrix(Vector(1,0,0),Vector(0,0,1),Vector(0,1,0)));
 	listener=0;
 	stats_mode=false;
+
+	gx_scene=gx_graphics->createScene( 0 );
+	if( !gx_scene ){
+		// B3_ALLOW_NO_3D_DEVICE is for tools\bench.ps1, which drives the engine
+		// core with no device present. Games never set it, so they still get
+		// the original "Unable to create 3D Scene" and no World.
+		if( !getenv( "B3_ALLOW_NO_3D_DEVICE" ) ){
+			delete world;world=0;
+			RTEX( "Unable to create 3D Scene" );
+		}
+	}
 }
 
 void blitz3d_close(){
+	if( world ){
+		bbClearWorld( 1,1,1 );
+		Texture::clearFilters();
+		loader_mat_map.clear();
+		delete world;world=0;
+	}
 	if( !gx_scene ) return;
-	bbClearWorld( 1,1,1 );
-	Texture::clearFilters();
-	loader_mat_map.clear();
-	delete world;
 	gx_graphics->freeScene( gx_scene );
 	gx_scene=0;
 }

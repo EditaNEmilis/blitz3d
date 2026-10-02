@@ -294,7 +294,7 @@ int bbSendNetMsg( int type,BBStr *msg,DPID from,DPID to,int reliable ){
 	int sz=msg->size()+sizeof(bbMsg);
 	if( sz>send_buff_sz ){
 		send_buff_sz=sz/2+sz;
-		delete send_buff;send_buff=d_new char[send_buff_sz];
+		delete[] send_buff;send_buff=d_new char[send_buff_sz];
 	}
 	bbMsg *m=(bbMsg*)send_buff;
 	m->type=type;m->from=from;m->to=to;

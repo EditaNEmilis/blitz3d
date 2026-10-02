@@ -34,6 +34,15 @@ void checkmem( std::ostream &out );
 int atoi( const std::string &s );
 double atof( const std::string &s );
 std::string itoa( int n );
+
+// ftoa(float,char*) formats into a caller-supplied buffer of at least
+// FTOA_BUFSIZE bytes, including the terminating null, and returns the number
+// of characters written not counting the null. It is the one every hot path
+// should call: bbruntime's _bbStrFromFloat goes straight from it into a
+// BBStr, with no std::string in between.
+const int FTOA_BUFSIZE=64;
+int ftoa( float n,char *dst );
+
 std::string ftoa( float n );
 std::string tolower( const std::string &s );
 std::string toupper( const std::string &s );

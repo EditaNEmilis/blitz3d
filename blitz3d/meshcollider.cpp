@@ -51,27 +51,56 @@ MeshCollider::~MeshCollider(){
 	delete tree;
 }
 
-bool MeshCollider::collide( const Line &line,float radius,Collision *curr_coll,const Transform &t ){
+bool MeshCollider::collide( const Line &line,float radius,Collision *curr_coll,const Transform &tform ){
 
 	if( !tree ) return false;
+
+	//The whole descent runs in object space. It used to run in world space
+	//with tform*t_v0/t_v1/t_v2 evaluated for every triangle that survived the
+	//box reject; line_box has been object space all along, so this just
+	//completes it - the line is transformed once here instead of three
+	//vertices per surviving triangle.
+	//
+	//tform.m is copied out first because the caller may well have handed us
+	//a reference into Matrix/Transform's shared scratch ring, and -tform
+	//below returns another one.
+	const Matrix tform_m=tform.m;
+	const Transform &local=-tform;
 
 	//create local box
 	Box box( line );
 	box.expand( radius );
-	Box local_box=-t * box;
+	Box local_box=local * box;
 
-	return collide( local_box,line,radius,t,curr_coll,tree );
+	//An affine transform leaves the line parameter alone - the point at
+	//parameter t maps to the point at parameter t - so collision time comes
+	//back in the caller's units and needs no correction. Only the normal has
+	//to be carried back, and only on the paths that actually set it.
+	Line local_line=local * line;
+
+	if( !collide( local_box,local_line,radius,curr_coll,tree ) ) return false;
+
+	//A plane normal maps across a transform as the transposed inverse, not as
+	//the matrix itself: the two agree for a rotation or a uniform scale, which
+	//is what transforming the three vertices used to compute, and disagree for
+	//a non-uniform one.
+	Matrix inv_m=-tform_m;
+	Vector world_n=(~inv_m)*curr_coll->normal;
+	world_n.normalize();
+	curr_coll->normal=world_n;
+
+	return true;
 }
 
-bool MeshCollider::collide( const Box &line_box,const Line &line,float radius,const Transform &tform,Collision *curr_coll,MeshCollider::Node *node ){
+bool MeshCollider::collide( const Box &line_box,const Line &line,float radius,Collision *curr_coll,MeshCollider::Node *node ){
 	if( !line_box.overlaps( node->box ) ){
 		return false;
 	}
 
 	bool hit=false;
 	if( !node->triangles.size() ){
-		if( node->left ) hit|=collide( line_box,line,radius,tform,curr_coll,node->left );
-		if( node->right ) hit|=collide( line_box,line,radius,tform,curr_coll,node->right );
+		if( node->left ) hit|=collide( line_box,line,radius,curr_coll,node->left );
+		if( node->right ) hit|=collide( line_box,line,radius,curr_coll,node->right );
 		return hit;
 	}
 
@@ -90,7 +119,7 @@ bool MeshCollider::collide( const Box &line_box,const Line &line,float radius,co
 		tri_box.update( t_v2 );
 		if( !tri_box.overlaps( line_box ) ) continue;
 
-		if( !curr_coll->triangleCollide( line,radius,tform*t_v0,tform*t_v1,tform*t_v2 ) ) continue;
+		if( !curr_coll->triangleCollide( line,radius,t_v0,t_v1,t_v2 ) ) continue;
 
 		curr_coll->surface=tri.surface;
 		curr_coll->index=tri.index;

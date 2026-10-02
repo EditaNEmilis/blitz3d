@@ -986,11 +986,16 @@ void bbTFormFilter( int enable ){
 static int p_ox,p_oy,p_hx,p_hy,p_vpx,p_vpy,p_vpw,p_vph;
 
 static gxCanvas *startPrinting(){
-	
+
 	gxCanvas *c=gx_graphics->getFrontCanvas();
 
-	c->lock();
-	c->unlock();
+	//NB: this used to do c->lock(); c->unlock(); first. gxCanvas::unlock()
+	//	only calls updateBitMask() when lock_mod_cnt!=mod_cnt, and lock() sets
+	//	lock_mod_cnt=mod_cnt, so with nothing in between the pair can only
+	//	ever have been a DirectDraw Lock/Unlock round trip on the front
+	//	surface - for a flipping front buffer that blocks on DDLOCK_WAIT
+	//	against the display refresh, and for a back buffer it is still two
+	//	COM calls per Print.
 
 	c->getOrigin( &p_ox,&p_oy );
 	c->getHandle( &p_hx,&p_hy );

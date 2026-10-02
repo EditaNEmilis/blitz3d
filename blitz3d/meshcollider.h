@@ -39,7 +39,8 @@ private:
 	Box nodeBox( const vector<int> &tris );
 	Node *createLeaf( const vector<int> &tris );
 	Node *createNode( const vector<int> &tris );
-	bool collide( const Box &box,const Line &line,float radius,const Transform &tform,Collision *curr_coll,Node *node );
+	//line, line_box and the vertices are all in object space - see collide().
+	bool collide( const Box &box,const Line &line,float radius,Collision *curr_coll,Node *node );
 };
 
 #endif

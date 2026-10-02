@@ -8,6 +8,10 @@
 #ifndef PARSER_H
 #define PARSER_H
 
+#include <map>
+#include <set>
+#include <string>
+
 #include "toker.h"
 #include "nodes.h"
 
@@ -21,6 +25,7 @@ public:
 private:
 	string incfile;
 	set<string> included;
+	map<string,string> incPaths;
 	Toker *toker,*main_toker;
 	map<string,DimNode*> arrayDecls;
 

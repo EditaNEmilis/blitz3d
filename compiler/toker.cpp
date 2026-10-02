@@ -110,7 +110,14 @@ string Toker::text(){
 }
 
 int Toker::lookAhead( int n ){
-	return tokes[curr_toke+n].n;
+	//Safe today only because nextline() always ends a line's token list with
+	//the '\n' it pushed, so a lookahead that runs to the end of the line lands
+	//on a terminator. Spell that out rather than relying on it: report the
+	//terminator, which makes the caller raise "Mismatched brackets" instead of
+	//reading past the end of the vector.
+	int i=curr_toke+n;
+	if( i<0 || i>=(int)tokes.size() ) return '\n';
+	return tokes[i].n;
 }
 
 void Toker::nextline(){
@@ -208,7 +215,8 @@ void Toker::nextline(){
 		}
 		tokes.push_back( Toke( c,from,++k ) );
 	}
-	if( !tokes.size() ) exit(0);
+	//Every line ends with the '\n' pushed above, so tokes is never empty here.
+	//An exit(0) that could only ever fire would silently truncate a compile.
 }
 
 int Toker::next(){

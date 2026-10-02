@@ -42,6 +42,17 @@ private:
 
 	mutable int cm_pitch;
 	mutable unsigned *cm_mask;
+	// The collision bitmask is a pure cache of the surface: nothing ever reads
+	// it except collide()/rect_collide(). So it is not maintained eagerly.
+	// damage() accumulates the union of everything it touched into cm_dirty
+	// and returns immediately, and the first collide after a change rebuilds
+	// exactly that region. cm_dirty_all is for the writers that change a pixel
+	// without saying which one - setPixelFast/copyPixelFast, a mip rebuild, a
+	// surface restore - where the only safe answer is "rebuild everything".
+	// cm_mod_cnt is the mod_cnt cm_mask was last brought up to date with.
+	mutable RECT cm_dirty;
+	mutable bool cm_dirty_all;
+	mutable int cm_mod_cnt;
 
 	RECT clip_rect;
 
@@ -53,6 +64,7 @@ private:
 	unsigned mask_surf,color_surf,color_argb,clsColor_surf;
 
 	void updateBitMask( const RECT &r )const;
+	void ensureBitMask()const;
 
 	/***** GX INTERFACE *****/
 public:
@@ -107,6 +119,9 @@ public:
 	void setPixelFast( int x,int y,unsigned argb ){
 		format.setPixel( locked_surf+y*locked_pitch+x*format.getPitch(),argb );
 		++mod_cnt;
+		// A pixel changed with no rectangle to attribute it to, so the
+		// collision mask can no longer be repaired incrementally.
+		cm_dirty_all=true;
 	}
 	void copyPixel( int x,int y,gxCanvas *src,int src_x,int src_y );
 	void copyPixelFast( int x,int y,gxCanvas *src,int src_x,int src_y );

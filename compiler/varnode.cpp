@@ -71,7 +71,7 @@ void IdentVarNode::semant( Environ *e ){
 void ArrayVarNode::semant( Environ *e ){
 	exprs->semant( e );
 	exprs->castTo( Type::int_type,e );
-	Type *t=e->findType( tag );
+	Type *t=tag.size() ? e->findType( tag ) : 0;
 	sem_decl=e->findDecl( ident );
 	if( !sem_decl || !(sem_decl->kind&DECL_ARRAY) ) ex( "Array not found" );
 	ArrayType *a=sem_decl->type->arrayType();

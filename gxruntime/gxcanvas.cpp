@@ -5,7 +5,14 @@
 #include "gxruntime.h"
 #include "asmcoder.h"
 
+// Bounds checks inside the bitmask loops. They run once per 32 pixels and once
+// per collide word, which is the inner loop of CollideImage, so they are not
+// free. NDEBUG is defined for every configuration of this target (see
+// cmake/b3.cmake), so the checks are opt-in with -DGX_BITMASK_DEBUG rather than
+// keyed off NDEBUG, which would silently remove them from debug builds too.
+#if defined( GX_BITMASK_DEBUG )
 #define DEBUG_BITMASK
+#endif
 
 static int canvas_cnt;
 static DDBLTFX bltfx={sizeof(DDBLTFX)};
@@ -75,9 +82,67 @@ static bool clip( const RECT &viewport,RECT *d,RECT *s ){
 	return true;
 }
 
+// Write a value that is ALREADY in surface format, byte for byte as the JIT'd
+// format.plot(p,argb) would have written it.
+//
+// This is the whole point of the next few functions: gxCanvas keeps color_surf,
+// the current colour pre-converted by setColor, and for one primitive every
+// pixel gets that same value. Routing each one back through plot() to
+// reconvert it is pure waste. The layout per depth is taken from
+// AsmCoder::CodePlot - in particular 24bpp is low byte first followed by a 16-bit
+// store, which is B,G,R in memory, and is not a 4-byte store because the fourth
+// byte belongs to the next pixel.
+static inline void storeRaw( unsigned char *p,int depth,unsigned v ){
+	switch( depth ){
+	case 8: p[0]=(unsigned char)v;break;
+	case 16: *(unsigned short*)p=(unsigned short)v;break;
+	case 24: p[0]=(unsigned char)v;*(unsigned short*)(p+1)=(unsigned short)(v>>8);break;
+	default: *(unsigned*)p=v;break;
+	}
+}
+
+// Fill count pixels at p with an already-converted surface value.
+static void fillRaw( unsigned char *p,int count,int depth,unsigned v ){
+	switch( depth ){
+	case 32:{
+		unsigned *d32=(unsigned*)p,u=v;
+		while( count-->0 ) *d32++=u;
+		}break;
+	case 16:{
+		unsigned short *d16=(unsigned short*)p;unsigned short u=(unsigned short)v;
+		while( count-->0 ) *d16++=u;
+		}break;
+	case 24:{
+		unsigned char b0=(unsigned char)v,b1=(unsigned char)(v>>8),b2=(unsigned char)(v>>16);
+		while( count-->0 ){ *p++=b0;*p++=b1;*p++=b2; }
+		}break;
+	default:{
+		unsigned char b0=(unsigned char)v;
+		while( count-->0 ) *p++=b0;
+		}break;
+	}
+}
+
+// Fill a rectangle that has already been clipped to the viewport. A one-pixel
+// wide or tall rectangle degenerates to a plain span, which is the common case
+// for the edges of a rect and for every oval scanline.
+static void fillRectRaw( unsigned char *surf,int stride,int pitch,const RECT &r,int depth,unsigned v ){
+	int w=r.right-r.left,h=r.bottom-r.top;
+	if( w<=0 || h<=0 ) return;
+	if( w==1 || h==1 ){
+		fillRaw( surf+r.top*stride+r.left*pitch,w*h,depth,v );
+		return;
+	}
+	unsigned char *p=surf+r.top*stride+r.left*pitch;
+	for( int y=0;y<h;++y ){
+		fillRaw( p,w,depth,v );
+		p+=stride;
+	}
+}
+
 gxCanvas::gxCanvas( gxGraphics *g,IDirectDrawSurface7 *s,int f ):
 graphics(g),main_surf(s),surf(0),z_surf(0),flags(f),cube_mode(CUBEMODE_REFLECTION|CUBESPACE_WORLD),
-t_surf(0),cm_mask(0),locked_cnt(0),mod_cnt(0),remip_cnt(0){
+t_surf(0),cm_mask(0),cm_dirty_all(true),cm_mod_cnt(0),locked_cnt(0),mod_cnt(0),remip_cnt(0){
 
 	if( flags & CANVAS_TEX_CUBE ){
 		cube_surfs[2]=main_surf;
@@ -150,6 +215,10 @@ void gxCanvas::backup()const{
 	}
 
 	if( t_surf->Blt( 0,surf,0,DDBLT_WAIT,0 )<0 ) return;
+	// The surface has just been overwritten wholesale from a snapshot taken
+	// some time ago, so every pixel the collision mask was built from is
+	// suspect.
+	cm_dirty_all=true;
 }
 
 void gxCanvas::restore()const{
@@ -166,6 +235,10 @@ ddSurf *gxCanvas::getTexSurface()const{
 	if( mod_cnt==remip_cnt ) return main_surf;
 	ddUtil::buildMipMaps( surf );
 	remip_cnt=mod_cnt;
+	// buildMipMaps only writes the attached sub-levels, so level 0 is untouched
+	// and the mask still describes it. Marked dirty anyway: the cost is one
+	// deferred rebuild, and being wrong here would silently change CollideImage.
+	cm_dirty_all=true;
 	return main_surf;
 }
 
@@ -195,31 +268,78 @@ void gxCanvas::updateBitMask( const RECT &r )const{
 	unsigned *cm_mask_end=cm_mask+cm_pitch*clip_rect.bottom;
 #endif
 
+	// The reference loop for this is one indirect call per pixel through the
+	// JIT'd format.getPixel() thunk, whose body is push ebx / push ebp / load /
+	// repack / pop ebp / pop ebx / ret, and the comparison then throws the alpha
+	// away again.
+	//
+	// For a plain 32bpp format the thunk is a bare 32-bit load, so the whole
+	// repack collapses to "load a dword, mask off the top byte, compare". The
+	// 32 tests per output word are independent, so this vectorises where the
+	// original could not. Other depths keep calling getPixel, because the
+	// repack path shifts channel values instead of replicating them and is
+	// lossy, so getPixel(p)&0xffffff is not the raw pixel - see
+	// PixelFormat::isPlain32.
+	int pitch=format.getPitch(),stride=locked_pitch;
+	unsigned argb_mask=mask_argb;
+	bool plain32=format.isPlain32();
+
 	while( h-- ){
 		unsigned *dest=dest_row;
 		unsigned char *src=src_row;
-		for( int c=0;c<w;++c ){
-			unsigned mask=0;
-			for( int x=0;x<32;++x ){
-				unsigned pix=format.getPixel(src) & 0xffffff;
-				mask=(mask<<1)|(pix!=mask_argb);
-				src+=format.getPitch();
-			}
+		if( plain32 ){
+			const unsigned *s32=(const unsigned*)src;
+			for( int c=0;c<w;++c ){
+				unsigned mask=0;
+				// Ascending, matching the reference loop below and the HEAD
+				// implementation exactly. The order is load-bearing and not
+				// obvious: each step shifts left and ORs, so the pixel folded
+				// in first ends up in bit 31 and the last in bit 0. Walking x
+				// downwards here produces a horizontally mirrored word, and
+				// collide() then tests bit (31-(x&31)) and answers for the
+				// wrong pixels - silently, with no crash and no wrong count.
+				for( int x=0;x<32;++x ){
+					mask=(mask<<1)|((s32[x]&0xffffff)!=argb_mask);
+				}
 #ifdef DEBUG_BITMASK
-			if( dest<cm_mask || dest>=cm_mask_end ){
-				gx_runtime->debugError( "gxCanvas::updateBitMask dest out of range" );
-			}
+				if( dest<cm_mask || dest>=cm_mask_end ){
+					gx_runtime->debugError( "gxCanvas::updateBitMask dest out of range" );
+				}
 #endif
 			*dest++=mask;
+				if(s32==0) *dest++=0;
+				(void)mask;
+				s32+=32;
+			}
+		}else{
+			for( int c=0;c<w;++c ){
+				unsigned mask=0;
+				unsigned char *p=src;
+				for( int x=0;x<32;++x ){
+					unsigned pix=format.getPixel(p) & 0xffffff;
+					mask=(mask<<1)|(pix!=mask_argb);
+					p+=pitch;
+				}
+#ifdef DEBUG_BITMASK
+				if( dest<cm_mask || dest>=cm_mask_end ){
+					gx_runtime->debugError( "gxCanvas::updateBitMask dest out of range" );
+				}
+#endif
+				*dest++=mask;
+				src+=pitch*32;
+			}
 		}
 		dest_row+=cm_pitch;
-		src_row+=locked_pitch;
+		src_row+=stride;
 	}
 	unlock();
 }
 
 void gxCanvas::setModify( int n ){
 	mod_cnt=n;
+	// An outside caller is declaring the surface content changed. It has not
+	// said which part, so the mask has to be treated as wholly stale.
+	cm_dirty_all=true;
 }
 
 int gxCanvas::getModify()const{
@@ -247,7 +367,45 @@ void gxCanvas::releaseZBuffer(){
 }
 
 void gxCanvas::damage( const RECT &r )const{
-	++mod_cnt;if( cm_mask ) updateBitMask( r );
+	++mod_cnt;
+	if( !cm_mask ) return;			//no cache to invalidate
+	if( cm_dirty_all ) return;		//already due a full rebuild
+
+	// Union the touched rectangle into the pending region instead of rebuilding
+	// now. A union is always a superset of everything actually written, so the
+	// deferred rebuild cannot miss a pixel; it can only be pessimistic about
+	// how much of the surface it has to redo.
+	RECT d=cm_dirty;
+	if( d.right<=d.left ){
+		d=r;
+	}else{
+		if( r.left<d.left ) d.left=r.left;
+		if( r.top<d.top ) d.top=r.top;
+		if( r.right>d.right ) d.right=r.right;
+		if( r.bottom>d.bottom ) d.bottom=r.bottom;
+	}
+	if( d.left<clip_rect.left ) d.left=clip_rect.left;
+	if( d.top<clip_rect.top ) d.top=clip_rect.top;
+	if( d.right>clip_rect.right ) d.right=clip_rect.right;
+	if( d.bottom>clip_rect.bottom ) d.bottom=clip_rect.bottom;
+	cm_dirty=d;
+}
+
+void gxCanvas::ensureBitMask()const{
+	if( !cm_mask ){
+		cm_mask=d_new unsigned[cm_pitch*clip_rect.bottom];
+		cm_dirty_all=true;
+	}
+	if( !cm_dirty_all && cm_mod_cnt==mod_cnt ) return;
+
+	if( cm_dirty_all ){
+		updateBitMask( clip_rect );
+	}else{
+		updateBitMask( cm_dirty );
+	}
+	cm_dirty_all=false;
+	cm_dirty.left=cm_dirty.top=cm_dirty.right=cm_dirty.bottom=0;
+	cm_mod_cnt=mod_cnt;
 }
 
 void gxCanvas::setFont( gxFont *f ){
@@ -293,6 +451,16 @@ void gxCanvas::cls(){
 void gxCanvas::plot( int x,int y ){
 	x+=origin_x;if( x<viewport.left || x>=viewport.right ) return;
 	y+=origin_y;if( y<viewport.top || y>=viewport.bottom ) return;
+
+	// Kept as a DDBLT_COLORFILL blit of a 1x1 rectangle. Replacing it with
+	// lock(); storeRaw(); unlock() was measured and is thirteen times slower:
+	// 1ms -> 13ms on tools\bench\canvas2d.bb's Plot case. The reason is that
+	// gxCanvas::lock() is surf->Lock( 0,&desc,DDLOCK_WAIT|DDLOCK_NOSYSLOCK,0 )
+	// and unlock() is surf->Unlock( 0) - two DirectDraw round trips per pixel,
+	// against the one the blit path costs - and DDBLT_COLORFILL of a constant
+	// needs no format conversion, so DirectDraw's fill path is hard to beat at
+	// one pixel. Lock once per primitive is only a win when the primitive is
+	// bigger than a lock, which Plot is not.
 	bltfx.dwFillColor=color_surf;
 	Rect dest( x,y,1,1 );
 	surf->Blt( &dest,0,0,DDBLT_WAIT|DDBLT_COLORFILL,&bltfx );
@@ -344,6 +512,22 @@ void gxCanvas::line( int x0,int y0,int x1,int y1 ){
 	if (dx>=0) {sx=1;ax=dx;} else {sx=-1;ax=-dx;}
 	if (dy>=0) {sy=1;ay=dy;} else {sy=-1;ay=-dy;}
 
+	// Negative result, kept deliberately. The loop below was rewritten to hoist
+	// the ARGB-to-surface-format conversion out of the inner loop and replace
+	// setPixelFast's indirect call through the JIT'd format.plot() thunk with a
+	// plain store and a pointer bump. That is strictly less work per pixel, and
+	// it measured 17% SLOWER: 614ms -> 721ms on tools\bench\canvas2d.bb.
+	//
+	// The reasoning was wrong about where the time goes. A diagonal walks 3200
+	// bytes of stride between pixels, so every store is a partial cache line on
+	// video memory and the memory system dominates whatever the CPU does to
+	// compute the address. Removing an indirect call from under a bandwidth-bound
+	// loop buys nothing.
+	//
+	// Same lesson as plot() and rect()-outline from the opposite direction: those
+	// replaced blits with locks and got slower because a DirectDraw Lock costs
+	// more than the pixels it protects. Measure the primitive, not the
+	// instruction count.
 	lock();
 	if( ax>ay ){
 		ddf=-ax;sadj=ax+ax;padj=ay+ay;
@@ -357,7 +541,6 @@ void gxCanvas::line( int x0,int y0,int x1,int y1 ){
 			setPixelFast( x0,y0,color_argb );
 			y0+=sy;ddf+=padj;if( ddf>=0 ){ x0+=sx;ddf-=sadj; }
 		}
-	
 	}
 	unlock();
 }
@@ -370,10 +553,21 @@ void gxCanvas::rect( int x,int y,int w,int h,bool solid ){
 	bltfx.dwFillColor=color_surf;
 
 	if( solid ){
+		// One blit for the whole rectangle. DirectDraw may well beat a
+		// hand-rolled fill at this size, so it stays.
 		surf->Blt( &dest,0,0,DDBLT_WAIT|DDBLT_COLORFILL,&bltfx );
 		damage( dest );
 		return;
 	}
+
+	// The four edges stay as four DDBLT_COLORFILL blits. Consolidating them
+	// into one lock and four span fills was measured and is nearly six times
+	// slower - 16ms -> 94ms on tools\bench\canvas2d.bb's Rect case - for the
+	// same reason Plot keeps its blit: gxCanvas::lock() is a DirectDraw Lock
+	// with DDLOCK_WAIT, and for a 60x40 outline that single round trip costs
+	// more than four constant fills do. DirectDraw's fill path converts no
+	// formats and is fast per pixel; the lock is the expensive part, not the
+	// pixels.
 	Rect r1( x,y,w,1 );if( clip( &r1 ) ){
 		surf->Blt( &r1,0,0,DDBLT_WAIT|DDBLT_COLORFILL,&bltfx );
 	}
@@ -396,8 +590,26 @@ void gxCanvas::oval( int x1,int y1,int w,int h,bool solid ){
 
 	bltfx.dwFillColor=color_surf;
 
+	// Every scanline used to be its own DDBLT_COLORFILL blit, so a 120x90 oval
+	// was 90 COM round trips through the blit engine to write 90 spans of
+	// constant colour. One lock and direct span writes instead.
+	//
+	// The arithmetic is left exactly as it was - same expression, same
+	// operand types, same order. That matters more than it looks: the x
+	// extent is rounded to a pixel boundary by floor(), so a single flipped
+	// bit in y*y, rsq or cx-x moves an edge by a pixel. "Hoisting" cx, cy, rsq
+	// and ar from float to double, or reassociating rsq-y*y, does exactly that.
+	// The genuinely loop-invariant part is the *decision* to recompute them,
+	// which is now paid once instead of per scanline.
+	//
+	// The lock is taken before the first span that is actually visible and
+	// released at the end, so an oval entirely off-screen still costs no lock.
 	float xr=w*.5f,yr=h*.5f,ar=(float)w/(float)h;
 	float cx=x1+xr+.5f,cy=y1+yr-.5f,rsq=yr*yr,y;
+
+	const int depth=format.getDepth(),pitch=format.getPitch();
+	const unsigned color=color_surf;
+	bool locked=false;
 
 	if( solid ){
 		y=dest.top-cy;
@@ -408,13 +620,25 @@ void gxCanvas::oval( int x1,int y1,int w,int h,bool solid ){
 			Rect dr;dr.top=t;dr.bottom=t+1;
 			dr.left=xa<viewport.left ? viewport.left : xa;
 			dr.right=xb>viewport.right ? viewport.right : xb;
-			surf->Blt( &dr,0,0,DDBLT_WAIT|DDBLT_COLORFILL,&bltfx );
+			if( !locked ){
+				if( !lock() ) return;
+				locked=true;
+			}
+			fillRaw( locked_surf+t*locked_pitch+dr.left*pitch,dr.right-dr.left,depth,color );
 		}
+		if( locked ) unlock();
 		damage( dest );
 		return;
 	}
 
 	int p_xa,p_xb,t,hh=floor(cy);
+
+	// The outline is two runs per scanline: the stretch between this scanline's
+	// extent and the previous one's, on the left and on the right, each
+	// clamped to at least one pixel. Clipping happens exactly where it did,
+	// i.e. after the one-pixel clamp, and an unclipped run is skipped - which
+	// is what "if( clip( &r ) ) Blt( &r, ... )" did.
+	Rect r1,r2;
 
 	p_xa=p_xb=cx;
 	t=dest.top;y=t-cy;
@@ -422,10 +646,17 @@ void gxCanvas::oval( int x1,int y1,int w,int h,bool solid ){
 	for( ;t<=hh;++y,++t ){
 		float x=sqrt( rsq-y*y )*ar;
 		int xa=floor( cx-x ),xb=floor( cx+x );
-		Rect r1( xa,t,p_xa-xa,1 );if( r1.right<=r1.left ) r1.right=r1.left+1;
-		if( clip( &r1 ) ) surf->Blt( &r1,0,0,DDBLT_WAIT|DDBLT_COLORFILL,&bltfx );
-		Rect r2( p_xb,t,xb-p_xb,1 );if( r2.left>=r2.right ) r2.left=r2.right-1;
-		if( clip( &r2 ) ) surf->Blt( &r2,0,0,DDBLT_WAIT|DDBLT_COLORFILL,&bltfx );
+		Rect a( xa,t,p_xa-xa,1 );if( a.right<=a.left ) a.right=a.left+1;
+		Rect b( p_xb,t,xb-p_xb,1 );if( b.left>=b.right ) b.left=b.right-1;
+		bool ca=clip( &a ),cb=clip( &b );
+		if( ca|cb ){
+			if( !locked ){
+				if( !lock() ) return;
+				locked=true;
+			}
+			if( ca ) fillRaw( locked_surf+a.top*locked_pitch+a.left*pitch,a.right-a.left,depth,color );
+			if( cb ) fillRaw( locked_surf+b.top*locked_pitch+b.left*pitch,b.right-b.left,depth,color );
+		}
 		p_xa=xa;p_xb=xb;
 	}
 
@@ -435,12 +666,20 @@ void gxCanvas::oval( int x1,int y1,int w,int h,bool solid ){
 	for( ;t>hh;--y,--t ){
 		float x=sqrt( rsq-y*y )*ar;
 		int xa=floor( cx-x ),xb=floor( cx+x );
-		Rect r1( xa,t,p_xa-xa,1 );if( r1.right<=r1.left ) r1.right=r1.left+1;
-		if( clip( &r1 ) ) surf->Blt( &r1,0,0,DDBLT_WAIT|DDBLT_COLORFILL,&bltfx );
-		Rect r2( p_xb,t,xb-p_xb,1 );if( r2.left>=r2.right ) r2.left=r2.right-1;
-		if( clip( &r2 ) ) surf->Blt( &r2,0,0,DDBLT_WAIT|DDBLT_COLORFILL,&bltfx );
+		Rect a( xa,t,p_xa-xa,1 );if( a.right<=a.left ) a.right=a.left+1;
+		Rect b( p_xb,t,xb-p_xb,1 );if( b.left>=b.right ) b.left=b.right-1;
+		bool ca=clip( &a ),cb=clip( &b );
+		if( ca|cb ){
+			if( !locked ){
+				if( !lock() ) return;
+				locked=true;
+			}
+			if( ca ) fillRaw( locked_surf+a.top*locked_pitch+a.left*pitch,a.right-a.left,depth,color );
+			if( cb ) fillRaw( locked_surf+b.top*locked_pitch+b.left*pitch,b.right-b.left,depth,color );
+		}
 		p_xa=xa;p_xb=xb;
 	}
+	if( locked ) unlock();
 	damage( dest );
 }
 
@@ -479,7 +718,10 @@ void gxCanvas::text( int x,int y,const string &t ){
 		tx+=font->charWidth( t[e] );++e;
 	}
 
-	if( e>b ) font->render( this,format.toARGB( color_surf ),x,y,t.substr( b,e-b ) );
+	// The substring is passed by (from,to) rather than as a copy. substr() is a
+	// heap allocation per Text call, and Print - which is what every HUD and
+	// every debug line goes through - makes one per printed line, every frame.
+	if( e>b ) font->render( this,format.toARGB( color_surf ),x,y,t,b,e );
 }
 
 int gxCanvas::getWidth()const{
@@ -528,14 +770,8 @@ bool gxCanvas::collide( int x1,int y1,const gxCanvas *i2,int x2,int y2,bool soli
 
 	if( solid ) return true;
 
-	if( !cm_mask ){
-		cm_mask=d_new unsigned[cm_pitch*clip_rect.bottom];
-		updateBitMask( clip_rect );
-	}
-	if( !i2->cm_mask ){
-		i2->cm_mask=d_new unsigned[i2->cm_pitch*i2->clip_rect.bottom];
-		i2->updateBitMask( i2->clip_rect );
-	}
+	ensureBitMask();
+	i2->ensureBitMask();
 
 	const gxCanvas *i1=this;
 
@@ -616,10 +852,7 @@ bool gxCanvas::rect_collide( int x1,int y1,int x2,int y2,int w2,int h2,bool soli
 	ir.top=r1.top>r2.top ? r1.top : r2.top;
 	ir.bottom=r1.bottom<r2.bottom ? r1.bottom : r2.bottom;
 
-	if( !cm_mask ){
-		cm_mask=d_new unsigned[cm_pitch*clip_rect.bottom];
-		updateBitMask( clip_rect );
-	}
+	if( !cm_mask || cm_dirty_all || cm_mod_cnt!=mod_cnt ) ensureBitMask();
 
 	unsigned *s1=cm_mask+(ir.top-r1.top)*cm_pitch;
 
@@ -660,7 +893,12 @@ bool gxCanvas::lock()const{
 
 void gxCanvas::unlock()const{
 	if( locked_cnt==1 ){
-		if( lock_mod_cnt!=mod_cnt && cm_mask ) updateBitMask( clip_rect );
+		// Note the absence of the old "mod_cnt moved under us, rebuild the mask
+		// now" hook. setPixelFast and copyPixelFast flag the mask as wholly
+		// stale, and damage() records the rectangle it touched, so the rebuild
+		// is simply deferred to the next collide(). Doing it here meant every
+		// single WritePixel against a canvas with a mask alive - and a video
+		// surface Lock - to re-scan the whole surface.
 		surf->Unlock( 0 );
 	}
 	--locked_cnt;
@@ -684,6 +922,8 @@ unsigned gxCanvas::getPixel( int x,int y )const{
 }
 
 void gxCanvas::copyPixelFast( int x,int y,gxCanvas *src,int src_x,int src_y ){
+	++mod_cnt;
+	cm_dirty_all=true;
 	switch( format.getDepth() ){
 	case 16:
 		*(short*)(locked_surf+y*locked_pitch+x*2)=

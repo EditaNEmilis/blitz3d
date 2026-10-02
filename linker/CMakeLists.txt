@@ -5,5 +5,4 @@ b3_lib( linker linker
 	std.cpp std.h )
 
 target_compile_definitions( linker PRIVATE _LIB )
-b3_o1( linker )
 target_link_libraries( linker PUBLIC config stdutil )
