@@ -504,7 +504,12 @@ void World::update( float elapsed ){
 		o->endUpdate();
 	}
 
-	for( int k=_usedTypeCount;--k; ){
+	//k-- evaluates the old value, so this visits every recorded index
+	//including 0. The --k form skips index 0, which would leave the
+	//first-used type's bucket holding last frame's objects forever:
+	//they would never be cleared, would be re-pushed every frame and
+	//would collide things that are no longer there.
+	for( int k=_usedTypeCount;k--; ){
 		_objsByType[_usedTypes[k]].clear();
 	}
 	_usedTypeCount=0;

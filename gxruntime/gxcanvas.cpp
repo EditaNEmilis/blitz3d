@@ -307,9 +307,7 @@ void gxCanvas::updateBitMask( const RECT &r )const{
 				}
 #endif
 			*dest++=mask;
-				if(s32==0) *dest++=0;
-				(void)mask;
-				s32+=32;
+			s32+=32;
 			}
 		}else{
 			for( int c=0;c<w;++c ){

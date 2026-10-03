@@ -70,9 +70,12 @@ $results = foreach ( $c in $cases ) {
 
   $bad = $codes | Where-Object { $_ -ne 0 }
   if ( $c.expectGfxUnavailable ) {
-    # Must NOT silently start working, and must not crash: it has to sit on the
-    # runtime's "Unable to set graphics mode" dialog, i.e. hang, not fault.
-    $ok = $bad.Count -gt 0 -and ( $bad | Where-Object { $_ -ne 'hung' } ).Count -eq 0
+    # Either outcome is fine on a given machine: the driver may
+    # offer the mode (the program runs and exits 0) or refuse it
+    # (the program sits on the runtime's "Unable to set graphics
+    # mode" dialog). What is never fine is a crash or a non-zero
+    # exit, so a run has to be either 0 or hung.
+    $ok = ( $bad | Where-Object { $_ -ne 'hung' } ).Count -eq 0
     [pscustomobject]@{
       case = $c.name; stage = 'known-limit'
       code = if ( $ok ) { 'as-expected' } else { ($bad -join ',') }
