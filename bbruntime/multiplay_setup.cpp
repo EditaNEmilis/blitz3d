@@ -6,6 +6,51 @@
 
 IDirectPlay4 *dirPlay;
 
+//dplayx.dll still ships with Windows, but CLSID_DirectPlay is no longer
+//registered, so the interface cannot be created through COM. The library is
+//still a COM server, though, so its class factory is used directly, and the
+//library is loaded by name so a machine without it still starts and the
+//feature reports itself unavailable rather than the program failing to load.
+static HMODULE dplay_module;
+
+typedef HRESULT (WINAPI *DllGetClassObject_t)( REFCLSID rclsid,REFIID riid,LPVOID *ppv );
+typedef HRESULT (WINAPI *DirectPlayLobbyCreate_t)( GUID *guidSP,void **lplpLobby,IUnknown *pUnk,LPVOID pvReserved,DWORD dwFlags );
+
+static bool loadDirectPlay(){
+	if( dplay_module ) return true;
+	dplay_module=LoadLibrary( "dplayx.dll" );
+	return dplay_module!=0;
+}
+
+//The class factory is used rather than DirectPlayCreate because of what
+//DirectPlayCreate does: it binds the object to a service provider as it
+//creates it, and a bound object refuses InitializeConnection, which is how
+//an address is attached to a session. The factory hands back an object with
+//no provider bound to it, which is what the rest of the code expects.
+static bool createDirectPlay( IDirectPlay4 **dp ){
+	if( !loadDirectPlay() ) return false;
+
+	DllGetClassObject_t getClassObject=(DllGetClassObject_t)GetProcAddress( dplay_module,"DllGetClassObject" );
+	if( !getClassObject ) return false;
+
+	IClassFactory *cf=0;
+	if( getClassObject( CLSID_DirectPlay,IID_IClassFactory,(void**)&cf )<0 || !cf ) return false;
+
+	bool ok=false;
+	if( cf->CreateInstance( 0,IID_IDirectPlay4A,(void**)dp )>=0 && *dp ) ok=true;
+	cf->Release();
+	return ok;
+}
+
+static bool createDirectPlayLobby( IDirectPlayLobby **lobby ){
+	if( !loadDirectPlay() ) return false;
+
+	DirectPlayLobbyCreate_t fn=(DirectPlayLobbyCreate_t)GetProcAddress( dplay_module,"DirectPlayLobbyCreateA" );
+	if( !fn ) return false;
+
+	return fn( 0,(void**)lobby,0,0,0 )>=0;
+}
+
 struct Connection{
 	GUID guid;
 	string name;
@@ -48,7 +93,7 @@ static void clearConnections(){
 
 static bool openDirPlay( HWND hwnd ){
 	if( dirPlay ) return true;
-	if( CoCreateInstance( CLSID_DirectPlay,0,CLSCTX_ALL,IID_IDirectPlay4A,(void**)&dirPlay )>=0 ) return true;
+	if( createDirectPlay( &dirPlay ) ) return true;
 	MessageBox( hwnd,"Error opening DirectPlay","DirectPlay Error",MB_ICONWARNING );
 	return false;
 }
@@ -63,7 +108,7 @@ static bool closeDirPlay( HWND hwnd ){
 
 static BOOL FAR PASCAL enumConnection( LPCGUID guid,LPVOID conn,DWORD size,LPCDPNAME name,DWORD flags,LPVOID context ){
 	IDirectPlay4 *dp;
-	if( CoCreateInstance( CLSID_DirectPlay,0,CLSCTX_ALL,IID_IDirectPlay4A,(void**)&dp )<0 ) return FALSE;
+	if( !createDirectPlay( &dp ) ) return FALSE;
 	int n=dp->InitializeConnection( conn,0 );
 	dp->Release();if( n<0 ) return TRUE;
 
@@ -302,13 +347,13 @@ int multiplay_setup_host( const string &game_name ){
 	int ret=0;
 	IDirectPlayLobby *lobby;
 	IDirectPlayLobby3 *lobby3;
-	if( CoCreateInstance( CLSID_DirectPlay,0,CLSCTX_ALL,IID_IDirectPlay4A,(void**)&dirPlay )>=0 ){
-		if( DirectPlayLobbyCreate( 0,&lobby,IID_IDirectPlayLobby,0,0 )>=0 ){
+	if( createDirectPlay( &dirPlay ) ){
+		if( createDirectPlayLobby( &lobby ) ){
 			if( lobby->QueryInterface( IID_IDirectPlayLobby3,(void**)&lobby3 )>=0 ){
 				//ok, create an address for initializeconnection
 				string ip( "\0" );
 				char address[256];DWORD sz=256;
-				if( lobby3->CreateAddress( &DPSPGUID_TCPIP,DPAID_INet,ip.data(),ip.size(),address,&sz )>=0 ){
+				if( lobby3->CreateAddress( DPSPGUID_TCPIP,DPAID_INet,ip.data(),(DWORD)ip.size(),address,&sz )>=0 ){
 					if( dirPlay->InitializeConnection( address,0 )>=0 ){
 						string name=game_name+'\0';
 						DPSESSIONDESC2 desc;
@@ -343,13 +388,13 @@ int multiplay_setup_join( const string &game_name,const string &ip_add ){
 	int ret=0;
 	IDirectPlayLobby *lobby;
 	IDirectPlayLobby3 *lobby3;
-	if( CoCreateInstance( CLSID_DirectPlay,0,CLSCTX_ALL,IID_IDirectPlay4A,(void**)&dirPlay )>=0 ){
-		if( DirectPlayLobbyCreate( 0,&lobby,IID_IDirectPlayLobby,0,0 )>=0 ){
+	if( createDirectPlay( &dirPlay ) ){
+		if( createDirectPlayLobby( &lobby ) ){
 			if( lobby->QueryInterface( IID_IDirectPlayLobby3,(void**)&lobby3 )>=0 ){
 				//ok, create an address for initializeconnection
 				string ip=ip_add+'\0';
 				char address[256];DWORD sz=256;
-				if( lobby3->CreateAddress( &DPSPGUID_TCPIP,DPAID_INet,ip.data(),ip.size(),address,&sz )>=0 ){
+				if( lobby3->CreateAddress( DPSPGUID_TCPIP,DPAID_INet,ip.data(),(DWORD)ip.size(),address,&sz )>=0 ){
 					if( dirPlay->InitializeConnection( address,0 )>=0 ){
 						DPSESSIONDESC2 desc;
 						memset(&desc,0,sizeof(desc));

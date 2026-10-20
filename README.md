@@ -6,6 +6,9 @@ What the fork adds so far:
 
 * `.x` model files load again, in both of the format's encodings, with no
   DirectX SDK and no `d3dxof.dll`. See BUILDING.md.
+* DirectPlay 4 networking works again, with no DirectX SDK: the library is
+  still shipped with Windows, and the interface is written out in the tree.
+  See BUILDING.md.
 * A modern build: Visual Studio 2019/2022, CMake and Ninja, with the original
   MSVC 6.0 workspace left untouched. See BUILDING.md.
 * A test gate: golden transcripts, a smoke matrix, benchmarks and a single

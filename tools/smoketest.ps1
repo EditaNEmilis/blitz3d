@@ -41,6 +41,11 @@ $cases = @(
   @{ name = 'timing';        body = "Graphics 320,240,32,2`nPrint MilliSecs() >= 0`nEndGraphics`nEnd" }
   @{ name = 'text';          body = "Graphics 320,240,32,2`nPrint `"one`"`nPrint `"two`"`nEndGraphics`nEnd" }
   @{ name = 'loop';          body = "Graphics 320,240,32,2`nFor i = 1 To 1000`nNext`nPrint `"looped`"`nEndGraphics`nEnd" }
+  # The multiplayer path: host a session over DirectPlay 4 and make a player.
+  # dplayx.dll may be missing or the network may be blocked, and then
+  # HostNetGame reports failure, which is not a crash: the case is that the
+  # DirectPlay code runs and the program still exits cleanly.
+  @{ name = 'netgame';       body = "Local r = HostNetGame( `"b3 smoke`" )`nIf r Then`n  Local p = CreateNetPlayer( `"tester`" )`n  StopNetGame`nEndIf`nEnd" }
   # Known environment limit, asserted so it cannot regress unnoticed.
   @{ name = 'exclusive-320'; body = "Graphics 320,240,32`nPrint `"hi`"`nEnd"
      expectGfxUnavailable = $true }

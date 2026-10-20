@@ -244,6 +244,55 @@ tidying.
   `_isnan` helpers collide with the CRT's `__cdecl` versions now that the
   default is `__stdcall`. Renamed to `b3finite` / `b3isnan`.
 
+### The DirectPlay 4 interface
+
+The DirectX SDK is not redistributable and Microsoft retired the download in
+favour of the End-User Runtime, which carries neither headers nor `d3dxof`, so
+`<dplay.h>` and `<dplobby.h>` cannot be had. `compat/dplay.h` and
+`compat/dplobby.h` are those two headers written out from the published
+interface, and they replace shims that declared the interfaces abstract so
+that no vtable layout could be got wrong. Nothing was ever called through
+those shims, so nothing caught the fact that their structures and constants
+were invented: `DPSESSIONDESC2` had the wrong field order, `DPNAME` had the
+wrong field order, `DPID_SYSMSG` was the wrong value, and the `DPSESSION_*`
+flags were the wrong values. A program that used the multiplayer commands
+would have talked to the wrong fields.
+
+The vtable order is the part that has to be exactly right, and it is not the
+order the methods are usually listed in. Each version of the interface added
+its methods in one block, and each block is in name order: `IDirectPlay4` is
+the IUnknown methods, then the methods `IDirectPlay2` added, then
+`IDirectPlay3`'s, then `IDirectPlay4`'s. `IDirectPlayLobby3` is laid out the
+same way, with the lobby's own methods, then `IDirectPlayLobby2`'s, then
+`IDirectPlayLobby3`'s. A call one slot out lands in the middle of somebody
+else's function, so the order in the header is the whole point of it.
+
+The library is still here. `dplayx.dll` ships with Windows, the 32-bit one in
+`SysWOW64`, and it exports `DirectPlayCreate`, `DirectPlayEnumerate`,
+`DirectPlayLobbyCreateA` and the COM entry points. What is gone is the
+registration: `CLSID_DirectPlay` is not in the registry, so
+`CoCreateInstance` cannot be used.
+
+Two consequences shape `bbruntime/multiplay_setup.cpp`:
+
+* The interface comes from the library's own class factory,
+  `DllGetClassObject` and `IClassFactory::CreateInstance`, rather than from
+  `DirectPlayCreate`. `DirectPlayCreate` binds the object to a service
+  provider as it creates it, and a bound object refuses
+  `InitializeConnection`, which is how an address is attached to a session.
+  The class factory hands back an object with no provider bound to it, which
+  is what the code expects.
+* The library is loaded by name with `LoadLibrary`, so a machine without it
+  still starts and the feature reports itself unavailable.
+
+`DirectPlayLobbyCreateA` is called with the signature it actually has, which
+takes no interface identifier: it hands back `IDirectPlayLobby`, and
+`IDirectPlayLobby3` is reached from there with `QueryInterface`. The lobby
+builds the TCP/IP address that `InitializeConnection` is given.
+
+`tools\smoketest.ps1` has a case that hosts a session and makes a player, so
+the path is run on every gate.
+
 ### The .x model format
 
 `blitz3d/loader_x.cpp` is the original reader. It needs `<dxfile.h>`,
@@ -345,15 +394,22 @@ hardcoded paths became plain header names:
 
 ## What does not work, and why
 
-**DirectPlay 4 networking.** `dplayx.dll` and `dplobby.dll` are not present on
-Windows 10 or 11 and `CLSID_DirectPlay` is unregistered, so `CoCreateInstance`
-fails before any interface pointer is obtained. `compat/dplay.h` and
-`compat/dplobby.h` declare just enough of the DirectPlay 4 surface for
-`bbruntime`'s multiplayer code to compile, with the interfaces left abstract so
-no vtable layout can be got wrong, and `DirectPlayLobbyCreate` made an inline
-stub that returns `DPERR_UNSUPPORTED`. The runtime reports multiplayer as
-unavailable rather than pretending. Restoring it means dropping `compat/` from
-the include path and putting the genuine DirectX SDK headers back.
+**DirectPlay 4 networking.** This works, and it is described under *Source
+changes* rather than here. The short version: `dplayx.dll` is still shipped
+with Windows and still exports everything the runtime needs, only the COM
+registration is gone, so the runtime asks the library's own class factory for
+the interface instead of going through `CoCreateInstance`, and
+`compat/dplay.h` and `compat/dplobby.h` are the DirectPlay 4 interface
+written out from the published definition rather than the SDK's headers.
+
+What is still missing is the lobby *server*, which was `dplobby.dll` and went
+away with the SDK. The lobby *client* is in `dplayx.dll` and is used, so
+building an address and listing the sessions on the network both work. A
+machine that has no firewall rule for `dplayx.dll` will not exchange sessions
+with another machine, because the session list exchange is inbound traffic;
+`tools\smoketest.ps1` runs the multiplayer path, and on a machine where the
+library or the network is not there the path reports failure rather than
+crashing.
 
 **`.x` model loading.** This used to be impossible and is not any more, so it
 is described under *Source changes* rather than here. The short version:
