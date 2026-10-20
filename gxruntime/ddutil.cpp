@@ -59,6 +59,12 @@ void PixelFormat::setFormat( const DDPIXELFORMAT &pf ){
 
 static void adjustTexSize( int *width,int *height,IDirect3DDevice7 *dir3dDev ){
     D3DDEVICEDESC7 ddDesc={0};
+	//No 3D device, so there are no caps to fit the texture to. This is
+	//the normal case on a machine where no Direct3D 7 device can be
+	//created, and asking the device for its caps there is a null
+	//dereference: loading a texture, and with it every model that has
+	//one, took the program down with it.
+	if( !dir3dDev ) return;
 	if( dir3dDev->GetCaps( &ddDesc )<0 ){
 		*width=*height=256;
 		return;

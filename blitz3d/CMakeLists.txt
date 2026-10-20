@@ -14,12 +14,15 @@ b3_lib( blitz3d blitz3d
 	listener.cpp listener.h
 	loader_3ds.cpp loader_3ds.h
 	loader_b3d.cpp loader_b3d.h
-	# loader_x.cpp needs <dxfile.h>, <rmxftmpl.h> and <rmxfguid.h> from the
-	# DirectX SDK, which Microsoft no longer distributes (only the End-User
-	# Runtime remains), plus d3dxof.dll at run time, which is equally gone.
-	# loader_x_stub.cpp keeps the Loader_X symbol that LoadModel's ".x" dispatch
-	# needs. Swap it for loader_x.cpp if you restore the SDK.
-	loader_x_stub.cpp loader_x.h
+	# loader_x.cpp is the original reader. It needs <dxfile.h>, <rmxftmpl.h>
+	# and <rmxfguid.h> from the DirectX SDK, which Microsoft no longer
+	# distributes (only the End-User Runtime remains), plus d3dxof.dll at
+	# run time, which is equally gone. loader_x_native.cpp reads the same
+	# format without either: xfile.cpp parses the text and binary encodings
+	# of the .x file, and the loader reads the standard templates out of
+	# the tree the parser builds. Swap it for loader_x.cpp if you restore
+	# the SDK and want the original back.
+	loader_x_native.cpp loader_x.h
 	md2model.cpp md2model.h
 	md2norms.cpp md2norms.h
 	md2rep.cpp md2rep.h
@@ -41,7 +44,8 @@ b3_lib( blitz3d blitz3d
 	terrain.cpp terrain.h
 	terrainrep.cpp terrainrep.h
 	texture.cpp texture.h
-	world.cpp world.h )
+	world.cpp world.h
+	xfile.cpp xfile.h )
 
 target_compile_definitions( blitz3d PRIVATE _LIB )
 # blitz3d/std.h pulls in gxruntime's public header for gxRuntime.

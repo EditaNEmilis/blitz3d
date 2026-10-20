@@ -56,12 +56,16 @@ $env:B3_ALLOW_NO_3D_DEVICE = '1'
 if ( Test-Path $work ) { Remove-Item $work -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $work | Out-Null
 
-# name -> files the program is expected to produce
+# name -> files the program is expected to produce, and an optional argument
 $cases = [ordered]@{
   'core'    = @('golden_core.bb',    @('geometry.txt'))
   'fmt'     = @('golden_fmt.bb',     @('ftoa.txt', 'strings.txt'))
   'collide' = @('golden_collide.bb', @('collide.txt'))
   '2d'      = @('golden_2d.bb',      @('2d.txt', '*.bmp'))
+  # The .x loader case is given a real model from the release tree, so the
+  # text encoding, the frame hierarchy, the material list and the texture
+  # are all covered and not just the cube the program writes itself.
+  'xmodel'  = @('golden_x.bb',       @('xmodel.txt'), (Join-Path $repo '_release\samples\birdie\dolphin\dolphin.x'))
 }
 if ( $Only ) {
   foreach ( $k in @($cases.Keys) ) { if ( $k -notmatch $Only ) { $cases.Remove( $k ) } }
@@ -109,7 +113,14 @@ foreach ( $name in $cases.Keys ) {
     }
   }
 
-  $p = Start-Process -FilePath (Join-Path $work "$name.exe") -WorkingDirectory $work -PassThru -WindowStyle Hidden
+  # A case can name an argument: the .x loader case is given a model to
+  # load, and the program reads it off the command line.
+  $exe = Join-Path $work "$name.exe"
+  if ( $cases[$name].Count -gt 2 -and $cases[$name][2] ) {
+    $p = Start-Process -FilePath $exe -ArgumentList $cases[$name][2] -WorkingDirectory $work -PassThru -WindowStyle Hidden
+  } else {
+    $p = Start-Process -FilePath $exe -WorkingDirectory $work -PassThru -WindowStyle Hidden
+  }
   # WaitForExit(int) on its own is not enough: a Blitz runtime error pops a
   # modal box that the process sits on forever, and that has to read as a
   # failure rather than as an empty transcript.

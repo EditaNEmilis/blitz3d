@@ -2,6 +2,17 @@
 
 This is a modified Blitz3D game engine for new features and supports.
 
+What the fork adds so far:
+
+* `.x` model files load again, in both of the format's encodings, with no
+  DirectX SDK and no `d3dxof.dll`. See BUILDING.md.
+* A modern build: Visual Studio 2019/2022, CMake and Ninja, with the original
+  MSVC 6.0 workspace left untouched. See BUILDING.md.
+* A test gate: golden transcripts, a smoke matrix, benchmarks and a single
+  `tools\gate.ps1` that says whether a change is good. See BUILDING.md.
+* A performance pass over the runtime, the 2D canvas, the scene graph and the
+  compiler, measured rather than assumed.
+
 There are two ways to build this.
 
 1) Modern toolchain (Visual Studio 2019/2022, CMake, Ninja)

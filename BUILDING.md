@@ -118,6 +118,7 @@ scratch rings all either work or produce garbage that looks fine.
 | `golden_core.bb` | entity/transform math, `TFormPoint`/`TFormVector`/`TFormNormal`, `EntityDistance`, matrix elements, mesh fitting. 768 lines. This is the only gate for `geom.h`. |
 | `golden_fmt.bb` | `ftoa` over a dense sweep plus every documented edge case of `Left`/`Right`/`Mid`/`Trim`/`LSet`/`RSet`/`String$`. 1936 lines. |
 | `golden_collide.bb` | sphere/box/ellipsoid/polygon collision, every response mode, contact points and normals. 1241 lines. This is the gate for any collision broadphase. |
+| `golden_x.bb` | the `.x` model loader: a cube it writes itself, in the text encoding, with normals and texture coordinates, and a real model from the release tree with a frame hierarchy, a material list and a texture. 24 lines. This is the gate for the `.x` reader. |
 
 ```
 tools\verify.ps1                  check
@@ -243,8 +244,57 @@ tidying.
   `_isnan` helpers collide with the CRT's `__cdecl` versions now that the
   default is `__stdcall`. Renamed to `b3finite` / `b3isnan`.
 
+### The .x model format
+
+`blitz3d/loader_x.cpp` is the original reader. It needs `<dxfile.h>`,
+`<rmxftmpl.h>` and `<rmxfguid.h>` from the DirectX SDK, plus `d3dxof.dll` at
+run time. Microsoft retired the full SDK download in favour of the End-User
+Runtime, which carries neither headers nor `d3dxof`, and the End-User Runtime
+is all that is still offered at the SDK's download page. The original file is
+left untouched.
+
+The format itself is documented, and the tree it holds is small: a template
+instance, its members in a fixed order, and its child templates. So
+`blitz3d/xfile.cpp` reads the file and `blitz3d/loader_x_native.cpp` reads the
+templates out of what it read, in the same order the SDK's templates describe.
+Neither needs the SDK or a Microsoft binary at run time.
+
+Both encodings are read. The text encoding is what most exporters write: the
+tree as text, with the members of a template in a flat run of numbers. The
+binary encoding is the same tree as a token stream, where the tokens carry the
+types, so a run of DWORDs and a run of floats are told apart by the token
+rather than guessed at.
+
+Two things the format does not tell you, and the reader has to supply:
+
+* The text encoding does not record whether a number was meant as an integer
+  or as a float, and an exporter is free to write `1` where a float is meant.
+  The template decides, so the reader reads the members of a template in
+  template order rather than by their syntax.
+* A material can be written inside the mesh's material list or as a reference
+  to a material named earlier in the file, so the reader keeps the instance
+  names and resolves the references.
+
+The templates that are read are `Mesh`, `MeshNormals`, `MeshTextureCoords`,
+`MeshVertexColors`, `MeshMaterialList`, `Material`, `TextureFilename`, `Frame`,
+`FrameTransformMatrix`, `AnimationSet`, `Animation` and `AnimationKey`. A
+rotation key is a quaternion with the scalar part first, which is the order the
+format writes and the order the engine's own quaternion uses.
+
+`tools\golden\golden_x.bb` is the gate: a cube it writes itself, so the text
+encoding is pinned against a file whose every byte is known there, and a real
+model from the release tree, so the frame hierarchy, the material list and the
+texture are covered too. Every `.x` file in `_release` loads with it: 45 of
+them, both encodings.
+
 ### The Windows SDK
 
+* `gxruntime/ddutil.cpp` — `adjustTexSize` asked the Direct3D 7 device for its
+  caps without checking that there was a device. There is not one on any
+  current Windows, so every texture load - `LoadTexture`, and with it every
+  model that names a texture - dereferenced a null device and took the program
+  down with it. With no device there are no caps to fit the texture to, so the
+  size is left alone.
 * `gxruntime/gxinput.{h,cpp}`, `gxruntime/gxruntime.cpp`, `gxruntime/std.h` —
   DirectInput 7 to 8. `dinput8.dll` on Windows 10 exports only
   `DirectInput8Create`; `DirectInputCreateEx`, which the original code calls, is
@@ -305,19 +355,10 @@ stub that returns `DPERR_UNSUPPORTED`. The runtime reports multiplayer as
 unavailable rather than pretending. Restoring it means dropping `compat/` from
 the include path and putting the genuine DirectX SDK headers back.
 
-**`.x` model loading.** `blitz3d/loader_x.cpp` needs `<dxfile.h>`,
-`<rmxftmpl.h>` and `<rmxfguid.h>` from the DirectX SDK, plus `d3dxof.dll` at run
-time. Microsoft retired the full SDK download in favour of the End-User
-Runtime, which carries neither headers nor `d3dxof`, and the End-User Runtime
-is all that is still offered at the SDK's download page. The original file is
-left untouched; `blitz3d/loader_x_stub.cpp` provides the `Loader_X::load` symbol
-that `LoadModel`'s `.x` dispatch needs, and returns 0, so `LoadMesh` reports
-failure. Swap the two entries in `blitz3d/CMakeLists.txt` if you restore the
-SDK.
-
-Two of the bundled birdie samples, `dolphin` and `LodMesh`, load `dolphin.x` and
-then use the result without checking it, so they fault on the null entity. Every
-other game in `_release` runs.
+**`.x` model loading.** This used to be impossible and is not any more, so it
+is described under *Source changes* rather than here. The short version:
+`blitz3d/xfile.cpp` reads the format and `blitz3d/loader_x_native.cpp` turns
+what it reads into meshes, with no DirectX SDK and no `d3dxof.dll`.
 
 **320x240 in exclusive fullscreen.** `Graphics 320,240,32` with no mode
 argument asks for exclusive fullscreen, not a window; mode 2 is windowed. Modern
@@ -337,7 +378,13 @@ Blitz3D does on any modern Windows.
 CMakeLists.txt          workspace, dependency order, third-party and MFC discovery
 cmake/b3.cmake          the four helpers every project file uses
 compat/                 dplay.h and dplobby.h for the SDK's DirectPlay gap
+blitz3d/xfile.{h,cpp}   the .x file reader, both encodings
+blitz3d/loader_x_native.cpp  the .x loader, on top of that reader
 tools/build.cmd         configure + build + stage
+tools/gate.ps1          build + verify + smoke + bench, one verdict
+tools/verify.ps1        golden transcripts
+tools/golden/           the golden programs and their expected output
+tools/bench.ps1         benchmarks against the baseline
 tools/probe.ps1         per-project compile probe
 tools/smoketest.ps1     compile and run a matrix of small programs
 tools/rungame.ps1       compile and run a real game
